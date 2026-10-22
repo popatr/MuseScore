@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
+#include <cstdlib>
 #include <optional>
 #include <vector>
 
@@ -31,10 +32,24 @@
 #include "mpe/tests/utils/articulationutils.h"
 #include "mpe/tests/mocks/articulationprofilesrepositorymock.h"
 
+#include "global/io/buffer.h"
+
+#include "engraving/compat/scoreaccess.h"
+#include "engraving/dom/chord.h"
+#include "engraving/dom/factory.h"
 #include "engraving/dom/masterscore.h"
+#include "engraving/dom/measure.h"
+#include "engraving/dom/note.h"
 #include "engraving/dom/part.h"
+#include "engraving/dom/segment.h"
+#include "engraving/infrastructure/localfileinfoprovider.h"
+#include "engraving/infrastructure/mscreader.h"
+#include "engraving/infrastructure/mscwriter.h"
 #include "engraving/playback/playbackmodel.h"
 #include "engraving/playback/practiceemphasis.h"
+#include "engraving/playback/practiceemphasisdata.h"
+#include "engraving/rw/mscloader.h"
+#include "engraving/rw/mscsaver.h"
 
 #include "utils/scorerw.h"
 
@@ -114,6 +129,122 @@ public:
         PracticeEmphasis::clearOverrideForTesting();
     }
 };
+
+class ScoreEmphasisGuard
+{
+public:
+    ScoreEmphasisGuard()
+    {
+        if (const char* value = std::getenv("MUSESCORE_PRACTICE_EMPHASIS")) {
+            m_previous = value;
+        }
+        ::unsetenv("MUSESCORE_PRACTICE_EMPHASIS");
+        PracticeEmphasis::clearOverrideForTesting();
+        PracticeEmphasis::clearEnvironmentCacheForTesting();
+    }
+
+    ~ScoreEmphasisGuard()
+    {
+        if (m_previous) {
+            ::setenv("MUSESCORE_PRACTICE_EMPHASIS", m_previous->c_str(), 1);
+        } else {
+            ::unsetenv("MUSESCORE_PRACTICE_EMPHASIS");
+        }
+        PracticeEmphasis::clearOverrideForTesting();
+        PracticeEmphasis::clearEnvironmentCacheForTesting();
+    }
+
+    std::optional<std::string> m_previous;
+};
+
+Note* findPitch(Score* score, int pitch)
+{
+    for (Measure* measure = score->firstMeasure(); measure; measure = measure->nextMeasure()) {
+        for (Segment* segment = measure->first(SegmentType::ChordRest); segment; segment = segment->next(SegmentType::ChordRest)) {
+            for (track_idx_t track = 0; track < score->ntracks(); ++track) {
+                EngravingItem* element = segment->element(track);
+                if (!element || !element->isChord()) {
+                    continue;
+                }
+                for (Note* note : toChord(element)->notes()) {
+                    if (note->pitch() == pitch) {
+                        return note;
+                    }
+                }
+            }
+        }
+    }
+    return nullptr;
+}
+
+int displayedMeasureNumber(const Measure* measure)
+{
+    return measure->measureNumber() + measure->measureNumberOffset() + 1;
+}
+
+const PracticeEmphasisData::PartRule* findPart(const std::vector<PracticeEmphasisData::PartRule>& parts, const std::string& id)
+{
+    for (const PracticeEmphasisData::PartRule& part : parts) {
+        if (part.id == id) {
+            return &part;
+        }
+    }
+    return nullptr;
+}
+
+void expectHeard(const std::vector<HeardNote>& notes, int midi, staff_layer_idx_t staff, voice_layer_idx_t voice, dynamic_level_t level)
+{
+    const HeardNote* heard = findMidi(notes, midi);
+    if (!heard) {
+        ADD_FAILURE() << "missing midi " << midi;
+        return;
+    }
+    EXPECT_EQ(heard->staff, staff) << midi;
+    EXPECT_EQ(heard->voice, voice) << midi;
+    EXPECT_EQ(heard->level, level) << midi;
+}
+
+bool writeMscz(MasterScore* score, ByteArray& out)
+{
+    muse::io::Buffer buffer(&out);
+    MscWriter::Params params;
+    params.device = &buffer;
+    params.filePath = "practice-emphasis-roundtrip.mscz";
+    params.mode = MscIoMode::Zip;
+
+    MscWriter writer(params);
+    if (!writer.open()) {
+        return false;
+    }
+
+    MscSaver saver(score->iocContext());
+    const bool wrote = saver.writeMscz(score, writer, false);
+    writer.close();
+    return wrote && !writer.hasError();
+}
+
+bool containerHasEmphasis(const ByteArray& mscz, ByteArray* json = nullptr)
+{
+    ByteArray copy = mscz;
+    muse::io::Buffer buffer(&copy);
+    MscReader::Params params;
+    params.device = &buffer;
+    params.filePath = "practice-emphasis-roundtrip.mscz";
+    params.mode = MscIoMode::Zip;
+
+    MscReader reader(params);
+    if (!reader.open()) {
+        return false;
+    }
+    const ByteArray data = reader.readPracticeEmphasisJsonFile();
+    if (data.empty()) {
+        return false;
+    }
+    if (json) {
+        *json = data;
+    }
+    return true;
+}
 }
 
 class Engraving_PracticeEmphasisTests : public ::testing::Test
@@ -302,4 +433,376 @@ TEST_F(Engraving_PracticeEmphasisTests, DivisiSplitsTheChordAndKeepsTheSharedUni
         EXPECT_EQ(findMidi(menNotes, 43)->level, tenorQuiet);
         EXPECT_GT(curveOut(women.dynamics, makeLayerIdx(companion, 0)), curveOut(women.dynamics, makeLayerIdx(0, 0)));
     }
+}
+
+TEST(Engraving_PracticeEmphasis, PartTemplatesMapChoirToStaffAndVoice)
+{
+    const std::vector<PracticeEmphasisData::PartRule> open = PracticeEmphasisData::templatesForStaffCount(4);
+    const std::vector<PracticeEmphasisData::PartRule> closed = PracticeEmphasisData::templatesForStaffCount(2);
+    const std::vector<PracticeEmphasisData::PartRule> oneStaff = PracticeEmphasisData::templatesForStaffCount(1);
+    ASSERT_EQ(open.size(), 8);
+    ASSERT_EQ(closed.size(), 8);
+    ASSERT_EQ(oneStaff.size(), 8);
+
+    const PracticeEmphasisData::PartRule* openS1 = findPart(open, "S1");
+    const PracticeEmphasisData::PartRule* openB2 = findPart(open, "B2");
+    ASSERT_TRUE(openS1);
+    ASSERT_TRUE(openB2);
+    EXPECT_EQ(openS1->staffIndex, 0);
+    EXPECT_EQ(openS1->voice, 0);
+    EXPECT_EQ(openS1->role, PracticeEmphasisData::Role::Top);
+    EXPECT_EQ(openB2->staffIndex, 3);
+    EXPECT_EQ(openB2->voice, 0);
+    EXPECT_EQ(openB2->role, PracticeEmphasisData::Role::Lower);
+
+    const PracticeEmphasisData::PartRule* closedA1 = findPart(closed, "A1");
+    const PracticeEmphasisData::PartRule* closedT2 = findPart(closed, "T2");
+    const PracticeEmphasisData::PartRule* closedB1 = findPart(closed, "B1");
+    ASSERT_TRUE(closedA1);
+    ASSERT_TRUE(closedT2);
+    ASSERT_TRUE(closedB1);
+    EXPECT_EQ(closedA1->staffIndex, 0);
+    EXPECT_EQ(closedA1->voice, 1);
+    EXPECT_EQ(closedT2->staffIndex, 1);
+    EXPECT_EQ(closedT2->voice, 0);
+    EXPECT_EQ(closedT2->role, PracticeEmphasisData::Role::Lower);
+    EXPECT_EQ(closedB1->staffIndex, 1);
+    EXPECT_EQ(closedB1->voice, 1);
+
+    const PracticeEmphasisData::PartRule* oneB2 = findPart(oneStaff, "B2");
+    ASSERT_TRUE(oneB2);
+    EXPECT_EQ(oneB2->staffIndex, 0);
+    EXPECT_EQ(oneB2->voice, 3);
+    EXPECT_TRUE(PracticeEmphasisData::templatesForStaffCount(0).empty());
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, UnionKeepsASharedNoteUntilEveryPartIsCleared)
+{
+    ScoreEmphasisGuard environment;
+    ASSERT_EQ(PracticeEmphasis::current().mode, PracticeEmphasis::Mode::Off);
+
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+    score->initAutomation();
+    ASSERT_EQ(displayedMeasureNumber(score->firstMeasure()), 1);
+
+    PlaybackData writtenWomen = loadPart(score, 0);
+    PlaybackData writtenMen = loadPart(score, 1);
+    const dynamic_level_t writtenLevel = findMidi(heardNotes(writtenWomen), 76)->level;
+    const dynamic_level_t tenorWritten = findMidi(heardNotes(writtenMen), 60)->level;
+    const dynamic_level_t loud = PracticeEmphasis::scaleDynamicLevel(writtenLevel, PracticeEmphasisData::DEFAULT_EMPHASIZED_DB);
+    const dynamic_level_t quiet = PracticeEmphasis::scaleDynamicLevel(writtenLevel, PracticeEmphasisData::DEFAULT_OTHER_DB);
+    const dynamic_level_t tenorQuiet = PracticeEmphasis::scaleDynamicLevel(tenorWritten, PracticeEmphasisData::DEFAULT_OTHER_DB);
+    const staff_layer_idx_t sopranoCompanion = PracticeEmphasis::EMPHASIS_STAFF_OFFSET;
+    const staff_layer_idx_t tenorCompanion = static_cast<staff_layer_idx_t>(1 + PracticeEmphasis::EMPHASIS_STAFF_OFFSET);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPlaybackActive(true);
+    emphasis.setGains(PracticeEmphasisData::DEFAULT_EMPHASIZED_DB, PracticeEmphasisData::DEFAULT_OTHER_DB);
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setPartSelected(score, "S2", true);
+
+    {
+        const std::vector<HeardNote> women = heardNotes(loadPart(score, 0));
+        expectHeard(women, 76, sopranoCompanion, 0, loud);
+        expectHeard(women, 72, sopranoCompanion, 0, loud);
+        expectHeard(women, 74, sopranoCompanion, 0, loud);
+        expectHeard(women, 67, 0, 1, quiet);
+        const std::vector<HeardNote> men = heardNotes(loadPart(score, 1));
+        expectHeard(men, 60, 1, 0, tenorQuiet);
+        expectHeard(men, 48, 1, 1, tenorQuiet);
+    }
+
+    // S2 leaves. S1 still sings the top note and the written unison, so those stay loud.
+    emphasis.setPartSelected(score, "S2", false);
+    {
+        const std::vector<HeardNote> women = heardNotes(loadPart(score, 0));
+        expectHeard(women, 76, sopranoCompanion, 0, loud);
+        expectHeard(women, 74, sopranoCompanion, 0, loud);
+        expectHeard(women, 72, 0, 0, quiet);
+        EXPECT_TRUE(emphasis.partSelected("S1"));
+        EXPECT_FALSE(emphasis.partSelected("S2"));
+    }
+
+    emphasis.setPartSelected(score, "S1", false);
+    emphasis.setPartSelected(score, "S2", true);
+    {
+        const std::vector<HeardNote> women = heardNotes(loadPart(score, 0));
+        expectHeard(women, 72, sopranoCompanion, 0, loud);
+        expectHeard(women, 74, sopranoCompanion, 0, loud);
+        expectHeard(women, 76, 0, 0, quiet);
+    }
+
+    // A one-note chord belongs to both parts of that voice. Clearing T2 leaves T1's claim.
+    emphasis.setPartSelected(score, "S2", false);
+    emphasis.setPartSelected(score, "T1", true);
+    emphasis.setPartSelected(score, "T2", true);
+    {
+        const std::vector<HeardNote> men = heardNotes(loadPart(score, 1));
+        const dynamic_level_t tenorLoud = PracticeEmphasis::scaleDynamicLevel(tenorWritten, PracticeEmphasisData::DEFAULT_EMPHASIZED_DB);
+        expectHeard(men, 60, tenorCompanion, 0, tenorLoud);
+        expectHeard(men, 59, tenorCompanion, 0, tenorLoud);
+        expectHeard(men, 48, 1, 1, tenorQuiet);
+    }
+    emphasis.setPartSelected(score, "T2", false);
+    {
+        const std::vector<HeardNote> men = heardNotes(loadPart(score, 1));
+        const dynamic_level_t tenorLoud = PracticeEmphasis::scaleDynamicLevel(tenorWritten, PracticeEmphasisData::DEFAULT_EMPHASIZED_DB);
+        expectHeard(men, 60, tenorCompanion, 0, tenorLoud);
+        expectHeard(men, 59, tenorCompanion, 0, tenorLoud);
+    }
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, OverridesAndRangeChangeWhoIsLoud)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+    score->initAutomation();
+
+    PlaybackData writtenWomen = loadPart(score, 0);
+    const dynamic_level_t writtenLevel = findMidi(heardNotes(writtenWomen), 76)->level;
+    const dynamic_level_t loud = PracticeEmphasis::scaleDynamicLevel(writtenLevel, 8.f);
+    const dynamic_level_t quiet = PracticeEmphasis::scaleDynamicLevel(writtenLevel, -18.f);
+    const staff_layer_idx_t companion = PracticeEmphasis::EMPHASIS_STAFF_OFFSET;
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPlaybackActive(true);
+    emphasis.setGains(8.f, -18.f);
+    emphasis.setPartSelected(score, "S1", true);
+
+    Note* e5 = findPitch(score, 76);
+    Note* c5 = findPitch(score, 72);
+    Note* d5 = findPitch(score, 74);
+    Note* alto = findPitch(score, 67);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(c5);
+    ASSERT_TRUE(d5);
+    ASSERT_TRUE(alto);
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+    EXPECT_TRUE(emphasis.isEmphasized(d5));
+    EXPECT_FALSE(emphasis.isEmphasized(c5));
+    EXPECT_FALSE(emphasis.isEmphasized(alto));
+
+    emphasis.toggleOverride(d5);
+    EXPECT_FALSE(emphasis.isEmphasized(d5));
+    EXPECT_EQ(emphasis.document().overrides.at(d5->eid().toStdString()), PracticeEmphasisData::Override::ForceOff);
+
+    emphasis.toggleOverride(d5);
+    EXPECT_TRUE(emphasis.isEmphasized(d5));
+    EXPECT_EQ(emphasis.document().overrides.find(d5->eid().toStdString()), emphasis.document().overrides.end());
+
+    emphasis.toggleOverride(c5);
+    EXPECT_TRUE(emphasis.isEmphasized(c5));
+    EXPECT_EQ(emphasis.document().overrides.at(c5->eid().toStdString()), PracticeEmphasisData::Override::ForceOn);
+    emphasis.clearOverrides();
+    EXPECT_FALSE(emphasis.isEmphasized(c5));
+    EXPECT_TRUE(emphasis.document().overrides.empty());
+
+    emphasis.toggleOverride(alto);
+    {
+        const std::vector<HeardNote> women = heardNotes(loadPart(score, 0));
+        expectHeard(women, 76, companion, 0, loud);
+        expectHeard(women, 74, companion, 0, loud);
+        expectHeard(women, 72, 0, 0, quiet);
+        expectHeard(women, 67, companion, 1, loud);
+        expectHeard(women, 65, 0, 1, quiet);
+    }
+
+    emphasis.setRange(2, 2);
+    EXPECT_FALSE(emphasis.isEmphasized(e5));
+    EXPECT_TRUE(emphasis.isEmphasized(alto));
+    {
+        const std::vector<HeardNote> women = heardNotes(loadPart(score, 0));
+        expectHeard(women, 76, 0, 0, quiet);
+        expectHeard(women, 74, 0, 0, quiet);
+        expectHeard(women, 67, companion, 1, loud);
+    }
+
+    emphasis.setRange(1, 1);
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+    emphasis.setRange(0, 0);
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+
+    delete score;
+}
+
+TEST(Engraving_PracticeEmphasis, ThreeNoteChordSplitsTopFromTheRestAndAUnisonIsShared)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = compat::ScoreAccess::createMasterScore(nullptr);
+    ASSERT_TRUE(score);
+
+    Chord* divided = Factory::createChord(score->dummy());
+    divided->setTrack(0);
+    Note* low = Factory::createNote(divided);
+    Note* middle = Factory::createNote(divided);
+    Note* high = Factory::createNote(divided);
+    low->setPitch(64);
+    middle->setPitch(67);
+    high->setPitch(72);
+    divided->add(low);
+    divided->add(middle);
+    divided->add(high);
+
+    Chord* unison = Factory::createChord(score->dummy());
+    unison->setTrack(0);
+    Note* shared = Factory::createNote(unison);
+    shared->setPitch(70);
+    unison->add(shared);
+
+    Chord* tiedPitch = Factory::createChord(score->dummy());
+    tiedPitch->setTrack(0);
+    Note* firstTop = Factory::createNote(tiedPitch);
+    Note* secondTop = Factory::createNote(tiedPitch);
+    firstTop->setPitch(70);
+    secondTop->setPitch(70);
+    tiedPitch->add(firstTop);
+    tiedPitch->add(secondTop);
+
+    PracticeEmphasisData::Document document;
+    PracticeEmphasisData::PartRule soprano1;
+    soprano1.id = "S1";
+    soprano1.staffIndex = 0;
+    soprano1.voice = 0;
+    soprano1.role = PracticeEmphasisData::Role::Top;
+    soprano1.selected = true;
+    PracticeEmphasisData::PartRule soprano2 = soprano1;
+    soprano2.id = "S2";
+    soprano2.role = PracticeEmphasisData::Role::Lower;
+    soprano2.selected = true;
+    document.parts = { soprano1, soprano2 };
+    score->practiceEmphasis().setDocument(document, false);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    EXPECT_TRUE(emphasis.isEmphasized(high));
+    EXPECT_TRUE(emphasis.isEmphasized(middle));
+    EXPECT_TRUE(emphasis.isEmphasized(low));
+    EXPECT_TRUE(emphasis.isEmphasized(shared));
+    EXPECT_TRUE(emphasis.isEmphasized(firstTop));
+    EXPECT_TRUE(emphasis.isEmphasized(secondTop));
+
+    emphasis.setPartSelected(score, "S2", false);
+    EXPECT_TRUE(emphasis.isEmphasized(high));
+    EXPECT_FALSE(emphasis.isEmphasized(middle));
+    EXPECT_FALSE(emphasis.isEmphasized(low));
+    EXPECT_TRUE(emphasis.isEmphasized(shared));
+    EXPECT_TRUE(emphasis.isEmphasized(firstTop));
+    EXPECT_FALSE(emphasis.isEmphasized(secondTop));
+
+    emphasis.setPartSelected(score, "S1", false);
+    emphasis.setPartSelected(score, "S2", true);
+    EXPECT_FALSE(emphasis.isEmphasized(high));
+    EXPECT_TRUE(emphasis.isEmphasized(middle));
+    EXPECT_TRUE(emphasis.isEmphasized(low));
+    EXPECT_TRUE(emphasis.isEmphasized(shared));
+    EXPECT_FALSE(emphasis.isEmphasized(firstTop));
+    EXPECT_TRUE(emphasis.isEmphasized(secondTop));
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, SidecarRoundTripsInsideTheScoreAndLeavesNotationAlone)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+    score->initAutomation();
+    ASSERT_TRUE(score->practiceEmphasis().isDefault());
+
+    ByteArray untouched;
+    ASSERT_TRUE(writeMscz(score, untouched));
+    EXPECT_FALSE(containerHasEmphasis(untouched));
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPlaybackActive(true);
+    emphasis.setEmphasisMode(true);
+    emphasis.setGains(8.f, -18.f);
+    emphasis.setRange(1, 1);
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setPartSelected(score, "S2", true);
+    emphasis.setPartSelected(score, "S2", false);
+
+    Note* d5 = findPitch(score, 74);
+    Note* alto = findPitch(score, 67);
+    Note* e5 = findPitch(score, 76);
+    ASSERT_TRUE(d5);
+    ASSERT_TRUE(alto);
+    ASSERT_TRUE(e5);
+    const auto d5Color = d5->color();
+    emphasis.toggleOverride(d5);
+    emphasis.toggleOverride(alto);
+    EXPECT_EQ(d5->color(), d5Color);
+    EXPECT_FALSE(emphasis.isDefault());
+
+    PracticeEmphasisData::Document stored = emphasis.document();
+    PracticeEmphasisData parsed;
+    EXPECT_TRUE(parsed.fromJson(emphasis.toJson()));
+    EXPECT_EQ(parsed.document(), stored);
+
+    const muse::ByteArray garbage("not-json");
+    EXPECT_FALSE(parsed.fromJson(garbage));
+    EXPECT_EQ(parsed.document(), stored);
+
+    ByteArray mscz;
+    ASSERT_TRUE(writeMscz(score, mscz));
+    ByteArray json;
+    ASSERT_TRUE(containerHasEmphasis(mscz, &json));
+    PracticeEmphasisData fromContainer;
+    EXPECT_TRUE(fromContainer.fromJson(json));
+    EXPECT_EQ(fromContainer.document(), stored);
+
+    MasterScore* reloaded = compat::ScoreAccess::createMasterScoreWithBaseStyle(score->iocContext());
+    reloaded->setFileInfoProvider(std::make_shared<LocalFileInfoProvider>("practice-emphasis-roundtrip.mscz"));
+    {
+        muse::io::Buffer buffer(&mscz);
+        MscReader::Params params;
+        params.device = &buffer;
+        params.filePath = "practice-emphasis-roundtrip.mscz";
+        params.mode = MscIoMode::Zip;
+        MscReader reader(params);
+        ASSERT_TRUE(reader.open());
+        MscLoader loader;
+        const muse::Ret loaded = loader.loadMscz(reloaded, reader, nullptr, true);
+        ASSERT_TRUE(loaded) << loaded.toString();
+    }
+
+    for (Score* each : reloaded->scoreList()) {
+        each->doLayout();
+    }
+    reloaded->initAutomation();
+    EXPECT_EQ(reloaded->practiceEmphasis().document(), stored);
+
+    Note* reloadedUnison = findPitch(reloaded, 74);
+    Note* reloadedAlto = findPitch(reloaded, 67);
+    Note* reloadedTop = findPitch(reloaded, 76);
+    Note* reloadedLower = findPitch(reloaded, 72);
+    ASSERT_TRUE(reloadedUnison);
+    ASSERT_TRUE(reloadedAlto);
+    ASSERT_TRUE(reloadedTop);
+    ASSERT_TRUE(reloadedLower);
+    EXPECT_FALSE(reloaded->practiceEmphasis().isEmphasized(reloadedUnison));
+    EXPECT_TRUE(reloaded->practiceEmphasis().isEmphasized(reloadedAlto));
+    EXPECT_TRUE(reloaded->practiceEmphasis().isEmphasized(reloadedTop));
+    EXPECT_FALSE(reloaded->practiceEmphasis().isEmphasized(reloadedLower));
+    EXPECT_EQ(reloaded->practiceEmphasis().document().overrides.at(reloadedUnison->eid().toStdString()),
+              PracticeEmphasisData::Override::ForceOff);
+    EXPECT_EQ(reloaded->practiceEmphasis().document().overrides.at(reloadedAlto->eid().toStdString()),
+              PracticeEmphasisData::Override::ForceOn);
+
+    reloaded->practiceEmphasis().setPlaybackActive(false);
+    const dynamic_level_t writtenLevel = findMidi(heardNotes(loadPart(reloaded, 0)), 76)->level;
+    reloaded->practiceEmphasis().setPlaybackActive(true);
+    const dynamic_level_t loud = PracticeEmphasis::scaleDynamicLevel(writtenLevel, 8.f);
+    const dynamic_level_t quiet = PracticeEmphasis::scaleDynamicLevel(writtenLevel, -18.f);
+    const std::vector<HeardNote> women = heardNotes(loadPart(reloaded, 0));
+    expectHeard(women, 76, PracticeEmphasis::EMPHASIS_STAFF_OFFSET, 0, loud);
+    expectHeard(women, 74, 0, 0, quiet);
+    expectHeard(women, 72, 0, 0, quiet);
+    expectHeard(women, 67, PracticeEmphasis::EMPHASIS_STAFF_OFFSET, 1, loud);
+
+    delete reloaded;
+    delete score;
 }

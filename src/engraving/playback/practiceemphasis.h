@@ -25,19 +25,19 @@
 
 namespace mu::engraving {
 class Note;
+class Score;
 struct NominalNoteCtx;
 
-//! Prototype practice-track emphasis. No UI. Set MUSESCORE_PRACTICE_EMPHASIS:
-//!   off | (unset)              written balance
-//!   voice:<staff>:<voice>:<dB> scale one voice's dynamic curve. Staff and voice are 1-based, voice is 1..4.
-//!                              Example: voice:1:2:-12 attenuates staff 1, voice 2.
-//!   s1 | s2                    divisi on staff 1 voice 1. The top note of a chord is S1, every lower
-//!                              note is S2, and a single notehead belongs to both. Emphasized notes
-//!                              move to a companion staff layer. Everyone else is attenuated.
-//!   s1:<emphDb>:<otherDb>      same, with explicit gains. Defaults are +6 and -12.
-//!                              One dynamic step (mf to f) is 6 dB.
+//! Practice-track emphasis. Playback and audio export share this path.
+//!
+//! The score's practice-emphasis.json is the normal control. MUSESCORE_PRACTICE_EMPHASIS is a
+//! debug override that ignores the score file when it is set:
+//!   off | (unset)              use the score sidecar
+//!   voice:<staff>:<voice>:<dB> scale one voice's dynamic curve. Staff and voice are 1-based.
+//!   s1 | s2                    divisi on staff 1 voice 1. Top note is S1, lower notes are S2,
+//!                              a single notehead belongs to both. Defaults are +6 and -12 dB.
+//!   s1:<emphDb>:<otherDb>      same split with explicit gains.
 //! MUSESCORE_PRACTICE_EMPHASIS_EMPH_DB and _OTHER_DB override the s1/s2 gains.
-//! The same playback events feed live playback and audio export.
 class PracticeEmphasis
 {
 public:
@@ -68,11 +68,13 @@ public:
     static const Config& current();
     static void setOverrideForTesting(const Config& config);
     static void clearOverrideForTesting();
+    static void clearEnvironmentCacheForTesting();
+    static bool debugOverrideActive();
 
     static muse::mpe::dynamic_level_t scaleDynamicLevel(muse::mpe::dynamic_level_t level, float gainDb);
 
     static bool noteIsEmphasized(const Note* note, const Config& config);
     static void applyToNote(const Note* note, NominalNoteCtx& ctx);
-    static void applyToDynamics(muse::mpe::DynamicAutomationLayers& layers);
+    static void applyToDynamics(const Score* score, muse::mpe::DynamicAutomationLayers& layers);
 };
 }
