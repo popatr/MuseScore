@@ -35,8 +35,14 @@ Item {
 
     property PlaybackToolBarModel playbackModel: null
 
+    PracticeEmphasisPanelModel {
+        id: emphasisModel
+
+        Component.onCompleted: emphasisModel.load()
+    }
+
     property NavigationPanel navPanel: null
-    readonly property int navigationOrderEnd: tempoLoader.navigationOrderEnd
+    readonly property int navigationOrderEnd: emphasisButton.navigation.order
 
     property bool floating: false
 
@@ -246,9 +252,32 @@ Item {
         }
     }
 
+    PopupButton {
+        id: emphasisButton
+
+        anchors.left: tempoLoader.right
+        anchors.leftMargin: 6
+        anchors.verticalCenter: parent.verticalCenter
+
+        width: 96
+        implicitHeight: root.height
+
+        text: qsTrc("playback", "Emphasis")
+        toolTipTitle: qsTrc("playback", "Practice emphasis")
+        toolTipDescription: qsTrc("playback", "Make selected choir parts louder without changing the notation")
+        accentButton: emphasisModel.playbackActive || isPopupOpened
+
+        navigation.panel: root.navPanel
+        navigation.order: tempoLoader.navigationOrderEnd + 1
+
+        popupComponent: PracticeEmphasisPopup {
+            emphasisModel: emphasisModel
+        }
+    }
+
     SeparatorLine {
         id: endSeparator
-        anchors.left: tempoLoader.right
+        anchors.left: emphasisButton.right
         anchors.leftMargin: 6
         anchors.topMargin: 2
         anchors.bottomMargin: 2

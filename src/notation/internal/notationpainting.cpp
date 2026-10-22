@@ -23,7 +23,10 @@
 
 #include <QScreen>
 
+#include "engraving/dom/masterscore.h"
+#include "engraving/dom/note.h"
 #include "engraving/dom/score.h"
+#include "engraving/playback/practiceemphasisdata.h"
 
 #include "notation.h"
 #include "notationinteraction.h"
@@ -201,6 +204,22 @@ void NotationPainting::paintView(Painter* painter, const RectF& frameRect, bool 
             }
             defaultColor.setAlpha(defaultColor.alpha() * 0.4f);
             return defaultColor;
+        };
+    } else {
+        // Screen only. Printing returns the notation color before this hook runs.
+        opt.overrideItemColor = [](const EngravingItem* item, Color defaultColor) {
+            if (!item->isNote()) {
+                return defaultColor;
+            }
+            const Note* note = toNote(item);
+            const MasterScore* master = note->score() ? note->score()->masterScore() : nullptr;
+            if (!master || !master->practiceEmphasis().document().emphasisMode) {
+                return defaultColor;
+            }
+            if (!master->practiceEmphasis().isEmphasized(note)) {
+                return defaultColor;
+            }
+            return Color(224, 32, 48);
         };
     }
 

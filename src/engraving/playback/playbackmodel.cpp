@@ -459,7 +459,7 @@ void PlaybackModel::updateContext(const track_idx_t trackFrom, const track_idx_t
         }
 
         muse::mpe::DynamicAutomationLayers dynamics = m_playbackCtx->dynamicLevelLayers(trackRange.startTrack, trackRange.endTrack);
-        PracticeEmphasis::applyToDynamics(dynamics);
+        PracticeEmphasis::applyToDynamics(m_score, dynamics);
 
         const PartData data {
             dynamics,
