@@ -321,7 +321,7 @@ StyledPopupView {
 
         FlatButton {
             Layout.fillWidth: true
-            text: qsTrc("playback", "Reset this part's edits")
+            text: qsTrc("playback", "Reset this part’s edits")
             enabled: root.emphasisModel.hasScore
             navigation.panel: navPanel
             navigation.order: 14
