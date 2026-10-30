@@ -23,6 +23,9 @@
 #include "practiceemphasispanelmodel.h"
 
 #include <cmath>
+#include <unordered_set>
+
+#include "translation.h"
 
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
@@ -47,6 +50,73 @@ int displayedMeasureNumber(const MeasureBase* measureBase)
     }
     const Measure* measure = toMeasure(measureBase);
     return measure->measureNumber() + measure->measureNumberOffset() + 1;
+}
+
+std::vector<PracticeEmphasisData::PartRule> visibleParts(const MasterScore* master)
+{
+    const int staves = master ? static_cast<int>(master->nstaves()) : 2;
+    std::vector<PracticeEmphasisData::PartRule> result = PracticeEmphasisData::templatesForStaffCount(staves);
+    if (!master) {
+        return result;
+    }
+
+    std::unordered_set<std::string> seen;
+    for (PracticeEmphasisData::PartRule& part : result) {
+        seen.insert(part.id);
+        for (const PracticeEmphasisData::PartRule& existing : master->practiceEmphasis().document().parts) {
+            if (existing.id == part.id) {
+                part = existing;
+                break;
+            }
+        }
+    }
+    for (const PracticeEmphasisData::PartRule& part : master->practiceEmphasis().document().parts) {
+        if (seen.insert(part.id).second) {
+            result.push_back(part);
+        }
+    }
+    return result;
+}
+
+const PracticeEmphasisData::PartRule* findVisible(const std::vector<PracticeEmphasisData::PartRule>& parts, const std::string& id)
+{
+    for (const PracticeEmphasisData::PartRule& part : parts) {
+        if (part.id == id) {
+            return &part;
+        }
+    }
+    return nullptr;
+}
+
+QString dropdownLabel(const PracticeEmphasisData::PartRule& part)
+{
+    if (part.builtin) {
+        return QString::fromStdString(part.id + "  " + part.name);
+    }
+    if (!part.name.empty()) {
+        return QString::fromStdString(part.name);
+    }
+    return QString::fromStdString(part.id);
+}
+
+bool isDescendantOf(const std::vector<PracticeEmphasisData::PartRule>& parts, const std::string& candidateId, const std::string& ancestorId)
+{
+    if (candidateId.empty() || ancestorId.empty() || candidateId == ancestorId) {
+        return false;
+    }
+    std::unordered_set<std::string> seen;
+    std::string current = candidateId;
+    while (!current.empty() && seen.insert(current).second) {
+        const PracticeEmphasisData::PartRule* part = findVisible(parts, current);
+        if (!part) {
+            break;
+        }
+        if (part->parentId == ancestorId) {
+            return true;
+        }
+        current = part->parentId;
+    }
+    return false;
 }
 }
 
@@ -156,15 +226,97 @@ QVariantList PracticeEmphasisPanelModel::parts() const
     MasterScore* master = currentMaster();
     const int staves = master ? static_cast<int>(master->nstaves()) : 2;
     QVariantList list;
-    for (const PracticeEmphasisData::PartRule& part : PracticeEmphasisData::templatesForStaffCount(staves)) {
+    for (const PracticeEmphasisData::PartRule& part : visibleParts(master)) {
         QVariantMap item;
         item.insert(QStringLiteral("id"), QString::fromStdString(part.id));
-        item.insert(QStringLiteral("name"), QString::fromStdString(part.id + "  " + part.name));
+        item.insert(QStringLiteral("label"), part.builtin ? QString::fromStdString(part.id)
+                                                          : dropdownLabel(part));
         item.insert(QStringLiteral("selected"), master && master->practiceEmphasis().partSelected(part.id));
-        item.insert(QStringLiteral("available"), master && part.staffIndex < staves);
+        item.insert(QStringLiteral("available"), master && (part.builtin ? part.staffIndex < staves : true));
         list.push_back(item);
     }
     return list;
+}
+
+QVariantList PracticeEmphasisPanelModel::editingPartOptions() const
+{
+    QVariantList list;
+    for (const PracticeEmphasisData::PartRule& part : visibleParts(currentMaster())) {
+        QVariantMap item;
+        item.insert(QStringLiteral("text"), dropdownLabel(part));
+        item.insert(QStringLiteral("value"), QString::fromStdString(part.id));
+        list.push_back(item);
+    }
+    return list;
+}
+
+QString PracticeEmphasisPanelModel::editingPartId() const
+{
+    const PracticeEmphasisData* emphasis = data();
+    return emphasis ? QString::fromStdString(emphasis->document().editingPartId) : QString();
+}
+
+QString PracticeEmphasisPanelModel::editingPartName() const
+{
+    const std::string id = editingPartId().toStdString();
+    if (id.empty()) {
+        return {};
+    }
+    if (const PracticeEmphasisData::PartRule* part = findVisible(visibleParts(currentMaster()), id)) {
+        return QString::fromStdString(part->name);
+    }
+    return {};
+}
+
+bool PracticeEmphasisPanelModel::editingPartBuiltin() const
+{
+    const std::string id = editingPartId().toStdString();
+    if (id.empty()) {
+        return true;
+    }
+    if (const PracticeEmphasisData::PartRule* part = findVisible(visibleParts(currentMaster()), id)) {
+        return part->builtin;
+    }
+    return true;
+}
+
+QString PracticeEmphasisPanelModel::editingPartParentId() const
+{
+    const std::string id = editingPartId().toStdString();
+    if (id.empty()) {
+        return {};
+    }
+    if (const PracticeEmphasisData::PartRule* part = findVisible(visibleParts(currentMaster()), id)) {
+        return QString::fromStdString(part->parentId);
+    }
+    return {};
+}
+
+QVariantList PracticeEmphasisPanelModel::parentOptions() const
+{
+    QVariantList list;
+    QVariantMap none;
+        none.insert(QStringLiteral("text"), muse::qtrc("playback", "(none)"));
+    none.insert(QStringLiteral("value"), QString());
+    list.push_back(none);
+
+    const std::string editingId = editingPartId().toStdString();
+    const std::vector<PracticeEmphasisData::PartRule> parts = visibleParts(currentMaster());
+    for (const PracticeEmphasisData::PartRule& part : parts) {
+        if (part.id == editingId || isDescendantOf(parts, part.id, editingId)) {
+            continue;
+        }
+        QVariantMap item;
+        item.insert(QStringLiteral("text"), dropdownLabel(part));
+        item.insert(QStringLiteral("value"), QString::fromStdString(part.id));
+        list.push_back(item);
+    }
+    return list;
+}
+
+bool PracticeEmphasisPanelModel::canDeleteEditingPart() const
+{
+    return hasScore() && !editingPartBuiltin() && !editingPartId().isEmpty();
 }
 
 bool PracticeEmphasisPanelModel::debugOverrideActive() const
@@ -187,11 +339,15 @@ void PracticeEmphasisPanelModel::setPlaybackActive(bool active)
 void PracticeEmphasisPanelModel::setEmphasisMode(bool enabled)
 {
     PracticeEmphasisData* emphasis = data();
-    if (!emphasis) {
+    MasterScore* master = currentMaster();
+    if (!emphasis || !master) {
         return;
     }
     if (enabled) {
         emphasis->setPlaybackActive(true);
+        if (emphasis->document().editingPartId.empty()) {
+            emphasis->setEditingPartId(master, "S1");
+        }
     }
     emphasis->setEmphasisMode(enabled);
 }
@@ -241,6 +397,34 @@ void PracticeEmphasisPanelModel::setPartSelected(const QString& partId, bool sel
     master->practiceEmphasis().setPartSelected(master, partId.toStdString(), selected);
 }
 
+void PracticeEmphasisPanelModel::setEditingPartId(const QString& partId)
+{
+    MasterScore* master = currentMaster();
+    if (!master) {
+        return;
+    }
+    master->practiceEmphasis().setEditingPartId(master, partId.toStdString());
+}
+
+void PracticeEmphasisPanelModel::setEditingPartName(const QString& name)
+{
+    PracticeEmphasisData* emphasis = data();
+    if (!emphasis) {
+        return;
+    }
+    emphasis->setPartName(emphasis->document().editingPartId, name.toStdString());
+}
+
+void PracticeEmphasisPanelModel::setEditingPartParentId(const QString& parentId)
+{
+    MasterScore* master = currentMaster();
+    PracticeEmphasisData* emphasis = data();
+    if (!master || !emphasis) {
+        return;
+    }
+    emphasis->setPartParent(master, emphasis->document().editingPartId, parentId.toStdString());
+}
+
 void PracticeEmphasisPanelModel::useSelectionRange()
 {
     if (!globalContext() || !globalContext()->currentNotation()) {
@@ -264,10 +448,30 @@ void PracticeEmphasisPanelModel::useSelectionRange()
     }
 }
 
-void PracticeEmphasisPanelModel::clearOverrides()
+void PracticeEmphasisPanelModel::addCustomPart()
+{
+    MasterScore* master = currentMaster();
+    PracticeEmphasisData* emphasis = data();
+    if (!master || !emphasis) {
+        return;
+    }
+    emphasis->addCustomPart(master, {}, emphasis->document().editingPartId);
+}
+
+void PracticeEmphasisPanelModel::deleteEditingPart()
 {
     PracticeEmphasisData* emphasis = data();
-    if (emphasis) {
-        emphasis->clearOverrides();
+    if (!emphasis) {
+        return;
     }
+    emphasis->deletePart(emphasis->document().editingPartId);
+}
+
+void PracticeEmphasisPanelModel::resetEditingPartEdits()
+{
+    PracticeEmphasisData* emphasis = data();
+    if (!emphasis) {
+        return;
+    }
+    emphasis->resetPartEdits(emphasis->document().editingPartId);
 }

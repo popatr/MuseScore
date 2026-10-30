@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <optional>
 #include <vector>
@@ -451,6 +452,7 @@ TEST(Engraving_PracticeEmphasis, PartTemplatesMapChoirToStaffAndVoice)
     EXPECT_EQ(openS1->staffIndex, 0);
     EXPECT_EQ(openS1->voice, 0);
     EXPECT_EQ(openS1->role, PracticeEmphasisData::Role::Top);
+    EXPECT_TRUE(openS1->builtin);
     EXPECT_EQ(openB2->staffIndex, 3);
     EXPECT_EQ(openB2->voice, 0);
     EXPECT_EQ(openB2->role, PracticeEmphasisData::Role::Lower);
@@ -555,7 +557,7 @@ TEST_F(Engraving_PracticeEmphasisTests, UnionKeepsASharedNoteUntilEveryPartIsCle
     delete score;
 }
 
-TEST_F(Engraving_PracticeEmphasisTests, OverridesAndRangeChangeWhoIsLoud)
+TEST_F(Engraving_PracticeEmphasisTests, EditsAndRangeChangeWhoIsLoud)
 {
     ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
@@ -572,6 +574,7 @@ TEST_F(Engraving_PracticeEmphasisTests, OverridesAndRangeChangeWhoIsLoud)
     emphasis.setPlaybackActive(true);
     emphasis.setGains(8.f, -18.f);
     emphasis.setPartSelected(score, "S1", true);
+    emphasis.setEditingPartId(score, "S1");
 
     Note* e5 = findPitch(score, 76);
     Note* c5 = findPitch(score, 72);
@@ -586,22 +589,31 @@ TEST_F(Engraving_PracticeEmphasisTests, OverridesAndRangeChangeWhoIsLoud)
     EXPECT_FALSE(emphasis.isEmphasized(c5));
     EXPECT_FALSE(emphasis.isEmphasized(alto));
 
-    emphasis.toggleOverride(d5);
+    emphasis.editNote(d5);
     EXPECT_FALSE(emphasis.isEmphasized(d5));
-    EXPECT_EQ(emphasis.document().overrides.at(d5->eid().toStdString()), PracticeEmphasisData::Override::ForceOff);
+    const PracticeEmphasisData::PartRule* soprano = findPart(emphasis.document().parts, "S1");
+    ASSERT_TRUE(soprano);
+    EXPECT_TRUE(std::find(soprano->removed.begin(), soprano->removed.end(), d5->eid().toStdString()) != soprano->removed.end());
 
-    emphasis.toggleOverride(d5);
+    emphasis.editNote(d5);
     EXPECT_TRUE(emphasis.isEmphasized(d5));
-    EXPECT_EQ(emphasis.document().overrides.find(d5->eid().toStdString()), emphasis.document().overrides.end());
+    soprano = findPart(emphasis.document().parts, "S1");
+    ASSERT_TRUE(soprano);
+    EXPECT_TRUE(soprano->removed.empty());
 
-    emphasis.toggleOverride(c5);
+    emphasis.editNote(c5);
     EXPECT_TRUE(emphasis.isEmphasized(c5));
-    EXPECT_EQ(emphasis.document().overrides.at(c5->eid().toStdString()), PracticeEmphasisData::Override::ForceOn);
-    emphasis.clearOverrides();
+    soprano = findPart(emphasis.document().parts, "S1");
+    ASSERT_TRUE(soprano);
+    EXPECT_TRUE(std::find(soprano->added.begin(), soprano->added.end(), c5->eid().toStdString()) != soprano->added.end());
+    emphasis.resetPartEdits("S1");
     EXPECT_FALSE(emphasis.isEmphasized(c5));
-    EXPECT_TRUE(emphasis.document().overrides.empty());
+    soprano = findPart(emphasis.document().parts, "S1");
+    ASSERT_TRUE(soprano);
+    EXPECT_TRUE(soprano->added.empty());
+    EXPECT_TRUE(soprano->removed.empty());
 
-    emphasis.toggleOverride(alto);
+    emphasis.editNote(alto);
     {
         const std::vector<HeardNote> women = heardNotes(loadPart(score, 0));
         expectHeard(women, 76, companion, 0, loud);
@@ -669,6 +681,7 @@ TEST(Engraving_PracticeEmphasis, ThreeNoteChordSplitsTopFromTheRestAndAUnisonIsS
     soprano1.voice = 0;
     soprano1.role = PracticeEmphasisData::Role::Top;
     soprano1.selected = true;
+    soprano1.builtin = true;
     PracticeEmphasisData::PartRule soprano2 = soprano1;
     soprano2.id = "S2";
     soprano2.role = PracticeEmphasisData::Role::Lower;
@@ -732,8 +745,9 @@ TEST_F(Engraving_PracticeEmphasisTests, SidecarRoundTripsInsideTheScoreAndLeaves
     ASSERT_TRUE(alto);
     ASSERT_TRUE(e5);
     const auto d5Color = d5->color();
-    emphasis.toggleOverride(d5);
-    emphasis.toggleOverride(alto);
+    emphasis.setEditingPartId(score, "S1");
+    emphasis.editNote(d5);
+    emphasis.editNote(alto);
     EXPECT_EQ(d5->color(), d5Color);
     EXPECT_FALSE(emphasis.isDefault());
 
@@ -787,10 +801,13 @@ TEST_F(Engraving_PracticeEmphasisTests, SidecarRoundTripsInsideTheScoreAndLeaves
     EXPECT_TRUE(reloaded->practiceEmphasis().isEmphasized(reloadedAlto));
     EXPECT_TRUE(reloaded->practiceEmphasis().isEmphasized(reloadedTop));
     EXPECT_FALSE(reloaded->practiceEmphasis().isEmphasized(reloadedLower));
-    EXPECT_EQ(reloaded->practiceEmphasis().document().overrides.at(reloadedUnison->eid().toStdString()),
-              PracticeEmphasisData::Override::ForceOff);
-    EXPECT_EQ(reloaded->practiceEmphasis().document().overrides.at(reloadedAlto->eid().toStdString()),
-              PracticeEmphasisData::Override::ForceOn);
+    const PracticeEmphasisData::PartRule* reloadedS1 = findPart(reloaded->practiceEmphasis().document().parts, "S1");
+    ASSERT_TRUE(reloadedS1);
+    EXPECT_TRUE(std::find(reloadedS1->removed.begin(), reloadedS1->removed.end(),
+                          reloadedUnison->eid().toStdString()) != reloadedS1->removed.end());
+    EXPECT_TRUE(std::find(reloadedS1->added.begin(), reloadedS1->added.end(),
+                          reloadedAlto->eid().toStdString()) != reloadedS1->added.end());
+    EXPECT_EQ(reloaded->practiceEmphasis().document().version, PracticeEmphasisData::CURRENT_VERSION);
 
     reloaded->practiceEmphasis().setPlaybackActive(false);
     const dynamic_level_t writtenLevel = findMidi(heardNotes(loadPart(reloaded, 0)), 76)->level;
@@ -805,4 +822,172 @@ TEST_F(Engraving_PracticeEmphasisTests, SidecarRoundTripsInsideTheScoreAndLeaves
 
     delete reloaded;
     delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, ChildInheritsParentNotesAndKeepsItsOwnRemovals)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    Note* e5 = findPitch(score, 76);
+    Note* c5 = findPitch(score, 72);
+    Note* d5 = findPitch(score, 74);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(c5);
+    ASSERT_TRUE(d5);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setEditingPartId(score, "S1");
+    const std::string childId = emphasis.addCustomPart(score, "S1 extra", "S1");
+    emphasis.setPartSelected(score, childId, true);
+    emphasis.setPartSelected(score, "S1", false);
+
+    EXPECT_TRUE(emphasis.partContains(e5, childId));
+    EXPECT_TRUE(emphasis.partContains(d5, childId));
+    EXPECT_FALSE(emphasis.partContains(c5, childId));
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+    EXPECT_FALSE(emphasis.isEmphasized(c5));
+
+    emphasis.setEditingPartId(score, childId);
+    emphasis.editNote(e5);
+    EXPECT_FALSE(emphasis.partContains(e5, childId));
+    EXPECT_TRUE(emphasis.partContains(e5, "S1"));
+    EXPECT_FALSE(emphasis.isEmphasized(e5));
+
+    emphasis.setEditingPartId(score, "S1");
+    emphasis.editNote(c5);
+    EXPECT_TRUE(emphasis.partContains(c5, "S1"));
+    EXPECT_TRUE(emphasis.partContains(c5, childId));
+    EXPECT_TRUE(emphasis.isEmphasized(c5));
+    EXPECT_FALSE(emphasis.partContains(e5, childId));
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, PerPartEditsDoNotLeakAndUnionIsAcrossCheckedParts)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    Note* e5 = findPitch(score, 76);
+    Note* c5 = findPitch(score, 72);
+    Note* d5 = findPitch(score, 74);
+    Note* alto = findPitch(score, 67);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(c5);
+    ASSERT_TRUE(d5);
+    ASSERT_TRUE(alto);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setPartSelected(score, "S2", true);
+    emphasis.setEditingPartId(score, "S1");
+    emphasis.editNote(d5);
+    emphasis.editNote(alto);
+
+    EXPECT_FALSE(emphasis.partContains(d5, "S1"));
+    EXPECT_TRUE(emphasis.partContains(d5, "S2"));
+    EXPECT_TRUE(emphasis.isEmphasized(d5));
+    EXPECT_TRUE(emphasis.partContains(alto, "S1"));
+    EXPECT_FALSE(emphasis.partContains(alto, "S2"));
+
+    emphasis.setPartSelected(score, "S2", false);
+    EXPECT_FALSE(emphasis.isEmphasized(d5));
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+    EXPECT_TRUE(emphasis.isEmphasized(alto));
+
+    const std::string soloId = emphasis.addCustomPart(score, "Solo", {});
+    EXPECT_TRUE(soloId.size() > 0);
+    EXPECT_FALSE(emphasis.partContains(e5, soloId));
+    emphasis.setEditingPartId(score, soloId);
+    emphasis.editNote(c5);
+    EXPECT_TRUE(emphasis.partContains(c5, soloId));
+    EXPECT_FALSE(emphasis.partContains(c5, "S1"));
+    EXPECT_FALSE(emphasis.isEmphasized(c5));
+
+    emphasis.setPartSelected(score, soloId, true);
+    EXPECT_TRUE(emphasis.isEmphasized(c5));
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+
+    emphasis.resetPartEdits(soloId);
+    EXPECT_FALSE(emphasis.partContains(c5, soloId));
+    EXPECT_FALSE(emphasis.isEmphasized(c5));
+    EXPECT_TRUE(emphasis.partContains(alto, "S1"));
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, ClickSwitchesEditingPartByStaffAndManualPartsStayPut)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    Note* e5 = findPitch(score, 76);
+    Note* alto = findPitch(score, 67);
+    Note* tenor = findPitch(score, 60);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(alto);
+    ASSERT_TRUE(tenor);
+    EXPECT_EQ(static_cast<int>(e5->staffIdx()), 0);
+    EXPECT_EQ(static_cast<int>(alto->staffIdx()), 0);
+    EXPECT_EQ(static_cast<int>(tenor->staffIdx()), 1);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setEditingPartId(score, "S1");
+    emphasis.setEmphasisMode(true);
+
+    emphasis.editNote(alto);
+    EXPECT_EQ(emphasis.document().editingPartId, "S1");
+    EXPECT_TRUE(emphasis.partContains(alto, "S1"));
+    EXPECT_EQ(emphasis.noteHighlight(e5), PracticeEmphasisData::Highlight::Edited);
+    EXPECT_EQ(emphasis.noteHighlight(alto), PracticeEmphasisData::Highlight::Edited);
+
+    emphasis.editNote(tenor);
+    EXPECT_EQ(emphasis.document().editingPartId, "T1");
+    EXPECT_FALSE(emphasis.partContains(tenor, "S1"));
+    EXPECT_FALSE(emphasis.partContains(tenor, "T1"));
+    EXPECT_EQ(emphasis.noteHighlight(e5), PracticeEmphasisData::Highlight::OtherLoud);
+    EXPECT_EQ(emphasis.noteHighlight(tenor), PracticeEmphasisData::Highlight::None);
+
+    const std::string manualId = emphasis.addCustomPart(score, "Picked notes", {});
+    emphasis.editNote(tenor);
+    EXPECT_EQ(emphasis.document().editingPartId, manualId);
+    EXPECT_TRUE(emphasis.partContains(tenor, manualId));
+    EXPECT_FALSE(emphasis.partContains(tenor, "T1"));
+
+    delete score;
+}
+
+TEST(Engraving_PracticeEmphasis, VersionOneOverridesAreIgnored)
+{
+    PracticeEmphasisData parsed;
+    const muse::ByteArray json(
+        "{"
+        "\"version\":1,"
+        "\"playbackActive\":true,"
+        "\"parts\":[{\"id\":\"S1\",\"name\":\"1st soprano\",\"staffIndex\":0,\"voice\":0,\"role\":\"top\",\"selected\":true}],"
+        "\"overrides\":{\"not-a-real-eid\":\"forceOn\"}"
+        "}");
+    EXPECT_TRUE(parsed.fromJson(json));
+    EXPECT_EQ(parsed.document().version, PracticeEmphasisData::CURRENT_VERSION);
+    ASSERT_EQ(parsed.document().parts.size(), 1u);
+    EXPECT_TRUE(parsed.document().parts.front().builtin);
+    EXPECT_TRUE(parsed.document().parts.front().added.empty());
+    EXPECT_TRUE(parsed.document().parts.front().removed.empty());
+    EXPECT_TRUE(parsed.document().parts.front().selected);
+
+    const muse::ByteArray written = parsed.toJson();
+    const std::string text(written.constChar(), written.size());
+    EXPECT_EQ(text.find("overrides"), std::string::npos);
+
+    PracticeEmphasisData roundtrip;
+    EXPECT_TRUE(roundtrip.fromJson(written));
+    EXPECT_EQ(roundtrip.document().version, PracticeEmphasisData::CURRENT_VERSION);
+    EXPECT_TRUE(roundtrip.document().parts.front().added.empty());
+    EXPECT_TRUE(roundtrip.document().parts.front().removed.empty());
 }

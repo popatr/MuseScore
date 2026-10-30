@@ -216,10 +216,15 @@ void NotationPainting::paintView(Painter* painter, const RectF& frameRect, bool 
             if (!master || !master->practiceEmphasis().document().emphasisMode) {
                 return defaultColor;
             }
-            if (!master->practiceEmphasis().isEmphasized(note)) {
-                return defaultColor;
+            switch (master->practiceEmphasis().noteHighlight(note)) {
+            case PracticeEmphasisData::Highlight::Edited:
+                return Color(224, 32, 48);
+            case PracticeEmphasisData::Highlight::OtherLoud:
+                return Color(200, 128, 64);
+            case PracticeEmphasisData::Highlight::None:
+                break;
             }
-            return Color(224, 32, 48);
+            return defaultColor;
         };
     }
 

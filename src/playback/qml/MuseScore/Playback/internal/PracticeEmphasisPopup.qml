@@ -33,7 +33,7 @@ StyledPopupView {
 
     required property PracticeEmphasisPanelModel emphasisModel
 
-    contentWidth: 440
+    contentWidth: 520
     contentHeight: contentColumn.implicitHeight
 
     NavigationPanel {
@@ -61,7 +61,7 @@ StyledPopupView {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             horizontalAlignment: Text.AlignLeft
-            text: qsTrc("playback", "Checked parts are loud. A note both parts sing stays loud until every one of those parts is unchecked. Click a red or black note while highlight is on to force it off or on. This is not written into the notation.")
+            text: qsTrc("playback", "Checked parts are loud. A shared note stays loud until every checked part that sings it is cleared. Highlight is red for the part being edited; other loud notes are faded. Click a note to add or remove it on that part only.")
         }
 
         StyledTextLabel {
@@ -82,7 +82,7 @@ StyledPopupView {
         }
 
         CheckBox {
-            text: qsTrc("playback", "Highlight notes and click to override")
+            text: qsTrc("playback", "Highlight notes and click to edit")
             checked: root.emphasisModel.emphasisMode
             enabled: root.emphasisModel.hasScore
             navigation.panel: navPanel
@@ -91,6 +91,7 @@ StyledPopupView {
         }
 
         RowLayout {
+            Layout.fillWidth: true
             spacing: 12
 
             StyledTextLabel {
@@ -135,6 +136,7 @@ StyledPopupView {
         }
 
         RowLayout {
+            Layout.fillWidth: true
             spacing: 12
 
             StyledTextLabel {
@@ -174,8 +176,14 @@ StyledPopupView {
                     root.emphasisModel.toMeasure = newValue
                 }
             }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
 
             FlatButton {
+                Layout.fillWidth: true
                 text: qsTrc("playback", "Selection")
                 enabled: root.emphasisModel.hasScore
                 navigation.panel: navPanel
@@ -184,6 +192,7 @@ StyledPopupView {
             }
 
             FlatButton {
+                Layout.fillWidth: true
                 text: qsTrc("playback", "All")
                 enabled: root.emphasisModel.hasScore
                 navigation.panel: navPanel
@@ -199,19 +208,20 @@ StyledPopupView {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             horizontalAlignment: Text.AlignLeft
-            text: qsTrc("playback", "0 means the whole score. On a closed SATB score, S and A are the upper staff and T and B the lower. The 1st part is the top note of a chord; the 2nd part is every note below it. A chord of one note belongs to both. Three or more notes are not split into a middle part.")
+            text: qsTrc("playback", "0 is the whole score. Closed SATB: S/A upper staff, T/B lower. 1st part = top of a chord; 2nd = notes below. One note belongs to both.")
         }
 
         Flow {
             Layout.fillWidth: true
-            spacing: 4
+            Layout.preferredWidth: root.contentWidth
+            spacing: 8
 
             Repeater {
                 model: root.emphasisModel.parts
 
                 CheckBox {
                     required property var modelData
-                    text: modelData.name
+                    text: modelData.label
                     checked: modelData.selected
                     enabled: modelData.available
                     onClicked: root.emphasisModel.setPartSelected(modelData.id, !checked)
@@ -219,12 +229,103 @@ StyledPopupView {
             }
         }
 
+        StyledTextLabel {
+            Layout.fillWidth: true
+            text: qsTrc("playback", "Editing")
+            horizontalAlignment: Text.AlignLeft
+            font: ui.theme.bodyBoldFont
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            StyledDropdown {
+                id: editingDropdown
+                Layout.fillWidth: true
+                enabled: root.emphasisModel.hasScore
+                model: root.emphasisModel.editingPartOptions
+                currentIndex: {
+                    var index = indexOfValue(root.emphasisModel.editingPartId)
+                    return index >= 0 ? index : 0
+                }
+                navigation.panel: navPanel
+                navigation.order: 9
+                navigation.name: "EditingPartDropdown"
+                onActivated: function(index, value) {
+                    root.emphasisModel.editingPartId = value
+                }
+            }
+
+            FlatButton {
+                text: qsTrc("playback", "New")
+                enabled: root.emphasisModel.hasScore
+                navigation.panel: navPanel
+                navigation.order: 10
+                onClicked: root.emphasisModel.addCustomPart()
+            }
+
+            FlatButton {
+                text: qsTrc("playback", "Delete")
+                enabled: root.emphasisModel.canDeleteEditingPart
+                navigation.panel: navPanel
+                navigation.order: 11
+                onClicked: root.emphasisModel.deleteEditingPart()
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            StyledTextLabel {
+                text: qsTrc("playback", "Name")
+            }
+
+            TextInputField {
+                Layout.fillWidth: true
+                enabled: root.emphasisModel.hasScore && !root.emphasisModel.editingPartBuiltin
+                currentText: root.emphasisModel.editingPartName
+                navigation.panel: navPanel
+                navigation.order: 12
+                onTextChanged: function(newTextValue) {
+                    root.emphasisModel.editingPartName = newTextValue
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            StyledTextLabel {
+                text: qsTrc("playback", "Parent")
+            }
+
+            StyledDropdown {
+                Layout.fillWidth: true
+                enabled: root.emphasisModel.hasScore && !root.emphasisModel.editingPartBuiltin
+                model: root.emphasisModel.parentOptions
+                currentIndex: {
+                    var index = indexOfValue(root.emphasisModel.editingPartParentId)
+                    return index >= 0 ? index : 0
+                }
+                navigation.panel: navPanel
+                navigation.order: 13
+                navigation.name: "ParentPartDropdown"
+                onActivated: function(index, value) {
+                    root.emphasisModel.editingPartParentId = value
+                }
+            }
+        }
+
         FlatButton {
-            text: qsTrc("playback", "Clear note overrides")
+            Layout.fillWidth: true
+            text: qsTrc("playback", "Reset this part's edits")
             enabled: root.emphasisModel.hasScore
             navigation.panel: navPanel
-            navigation.order: 9
-            onClicked: root.emphasisModel.clearOverrides()
+            navigation.order: 14
+            onClicked: root.emphasisModel.resetEditingPartEdits()
         }
     }
 }
