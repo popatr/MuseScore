@@ -199,14 +199,14 @@ int PracticeEmphasisPanelModel::emphasizedDb() const
 {
     const PracticeEmphasisData* emphasis = data();
     return emphasis ? static_cast<int>(std::lround(emphasis->document().emphasizedDb))
-                    : static_cast<int>(PracticeEmphasisData::DEFAULT_EMPHASIZED_DB);
+           : static_cast<int>(PracticeEmphasisData::DEFAULT_EMPHASIZED_DB);
 }
 
 int PracticeEmphasisPanelModel::otherDb() const
 {
     const PracticeEmphasisData* emphasis = data();
     return emphasis ? static_cast<int>(std::lround(emphasis->document().otherDb))
-                    : static_cast<int>(PracticeEmphasisData::DEFAULT_OTHER_DB);
+           : static_cast<int>(PracticeEmphasisData::DEFAULT_OTHER_DB);
 }
 
 int PracticeEmphasisPanelModel::fromMeasure() const
@@ -230,7 +230,7 @@ QVariantList PracticeEmphasisPanelModel::parts() const
         QVariantMap item;
         item.insert(QStringLiteral("id"), QString::fromStdString(part.id));
         item.insert(QStringLiteral("label"), part.builtin ? QString::fromStdString(part.id)
-                                                          : dropdownLabel(part));
+                    : dropdownLabel(part));
         item.insert(QStringLiteral("selected"), master && master->practiceEmphasis().partSelected(part.id));
         item.insert(QStringLiteral("available"), master && (part.builtin ? part.staffIndex < staves : true));
         list.push_back(item);
@@ -296,7 +296,7 @@ QVariantList PracticeEmphasisPanelModel::parentOptions() const
 {
     QVariantList list;
     QVariantMap none;
-        none.insert(QStringLiteral("text"), muse::qtrc("playback", "(none)"));
+    none.insert(QStringLiteral("text"), muse::qtrc("playback", "(none)"));
     none.insert(QStringLiteral("value"), QString());
     list.push_back(none);
 
