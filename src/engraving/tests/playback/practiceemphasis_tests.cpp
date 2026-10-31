@@ -43,6 +43,7 @@
 #include "engraving/dom/note.h"
 #include "engraving/dom/part.h"
 #include "engraving/dom/segment.h"
+#include "engraving/editing/transaction/undostack.h"
 #include "engraving/infrastructure/localfileinfoprovider.h"
 #include "engraving/infrastructure/mscreader.h"
 #include "engraving/infrastructure/mscwriter.h"
@@ -945,7 +946,7 @@ TEST_F(Engraving_PracticeEmphasisTests, ClickSwitchesEditingPartByStaffAndManual
     EXPECT_EQ(emphasis.document().editingPartId, "S1");
     EXPECT_TRUE(emphasis.partContains(alto, "S1"));
     EXPECT_EQ(emphasis.noteHighlight(e5), PracticeEmphasisData::Highlight::Edited);
-    EXPECT_EQ(emphasis.noteHighlight(alto), PracticeEmphasisData::Highlight::Edited);
+    EXPECT_EQ(emphasis.noteHighlight(alto), PracticeEmphasisData::Highlight::EditedAdded);
 
     emphasis.editNote(tenor);
     EXPECT_EQ(emphasis.document().editingPartId, "T1");
@@ -1013,6 +1014,129 @@ TEST_F(Engraving_PracticeEmphasisTests, CustomPartNameAndParentSurviveEditingSwi
     delete score;
 }
 
+TEST_F(Engraving_PracticeEmphasisTests, SoloUsesOnlyEditingPartWithoutChangingChecks)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    Note* e5 = findPitch(score, 76);
+    Note* alto = findPitch(score, 67);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(alto);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPlaybackActive(true);
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setPartSelected(score, "A1", true);
+    emphasis.setEditingPartId(score, "S1");
+
+    EXPECT_TRUE(emphasis.partSelected("S1"));
+    EXPECT_TRUE(emphasis.partSelected("A1"));
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+    EXPECT_TRUE(emphasis.isEmphasized(alto));
+    EXPECT_TRUE(emphasis.playbackEngaged());
+
+    emphasis.setSolo(true);
+    EXPECT_TRUE(emphasis.document().solo);
+    EXPECT_TRUE(emphasis.partSelected("S1"));
+    EXPECT_TRUE(emphasis.partSelected("A1"));
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+    EXPECT_FALSE(emphasis.isEmphasized(alto));
+    EXPECT_TRUE(emphasis.playbackEngaged());
+
+    emphasis.setEditingPartId(score, "A1");
+    EXPECT_FALSE(emphasis.isEmphasized(e5));
+    EXPECT_TRUE(emphasis.isEmphasized(alto));
+
+    emphasis.setSolo(false);
+    EXPECT_FALSE(emphasis.document().solo);
+    EXPECT_TRUE(emphasis.partSelected("S1"));
+    EXPECT_TRUE(emphasis.partSelected("A1"));
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+    EXPECT_TRUE(emphasis.isEmphasized(alto));
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, AddedNotesHighlightAsEditedAdded)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    Note* e5 = findPitch(score, 76);
+    Note* c5 = findPitch(score, 72);
+    Note* alto = findPitch(score, 67);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(c5);
+    ASSERT_TRUE(alto);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setEmphasisMode(true);
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setPartSelected(score, "S2", true);
+    emphasis.setEditingPartId(score, "S1");
+
+    EXPECT_EQ(emphasis.noteHighlight(e5), PracticeEmphasisData::Highlight::Edited);
+    EXPECT_EQ(emphasis.noteHighlight(c5), PracticeEmphasisData::Highlight::OtherLoud);
+    EXPECT_EQ(emphasis.noteHighlight(alto), PracticeEmphasisData::Highlight::None);
+
+    emphasis.editNote(alto);
+    EXPECT_TRUE(emphasis.partContains(alto, "S1"));
+    EXPECT_EQ(emphasis.noteHighlight(alto), PracticeEmphasisData::Highlight::EditedAdded);
+    EXPECT_EQ(emphasis.noteHighlight(e5), PracticeEmphasisData::Highlight::Edited);
+
+    emphasis.editNote(e5);
+    EXPECT_FALSE(emphasis.partContains(e5, "S1"));
+    EXPECT_EQ(emphasis.noteHighlight(e5), PracticeEmphasisData::Highlight::None);
+    EXPECT_EQ(emphasis.noteHighlight(alto), PracticeEmphasisData::Highlight::EditedAdded);
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, SidecarRoundTripsSoloAndOlderFilesDefaultOff)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPlaybackActive(true);
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setEditingPartId(score, "S1");
+    emphasis.setSolo(true);
+
+    PracticeEmphasisData parsed;
+    EXPECT_TRUE(parsed.fromJson(emphasis.toJson()));
+    EXPECT_EQ(parsed.document().version, PracticeEmphasisData::CURRENT_VERSION);
+    EXPECT_TRUE(parsed.document().solo);
+    EXPECT_EQ(parsed.document(), emphasis.document());
+
+    ByteArray mscz;
+    ASSERT_TRUE(writeMscz(score, mscz));
+    ByteArray json;
+    ASSERT_TRUE(containerHasEmphasis(mscz, &json));
+    PracticeEmphasisData fromContainer;
+    EXPECT_TRUE(fromContainer.fromJson(json));
+    EXPECT_TRUE(fromContainer.document().solo);
+    EXPECT_EQ(fromContainer.document(), emphasis.document());
+
+    PracticeEmphasisData legacy;
+    const muse::ByteArray v2(
+        "{"
+        "\"version\":2,"
+        "\"playbackActive\":true,"
+        "\"editingPartId\":\"S1\","
+        "\"parts\":[{\"id\":\"S1\",\"name\":\"1st soprano\",\"staffIndex\":0,\"voice\":0,\"role\":\"top\",\"selected\":true}]"
+        "}");
+    EXPECT_TRUE(legacy.fromJson(v2));
+    EXPECT_FALSE(legacy.document().solo);
+    EXPECT_EQ(legacy.document().version, PracticeEmphasisData::CURRENT_VERSION);
+
+    delete score;
+}
+
 TEST(Engraving_PracticeEmphasis, VersionOneOverridesAreIgnored)
 {
     PracticeEmphasisData parsed;
@@ -1040,4 +1164,246 @@ TEST(Engraving_PracticeEmphasis, VersionOneOverridesAreIgnored)
     EXPECT_EQ(roundtrip.document().version, PracticeEmphasisData::CURRENT_VERSION);
     EXPECT_TRUE(roundtrip.document().parts.front().added.empty());
     EXPECT_TRUE(roundtrip.document().parts.front().removed.empty());
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, UndoRedoClicksResetAndDropsRedoTail)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    Note* e5 = findPitch(score, 76);
+    Note* c5 = findPitch(score, 72);
+    Note* d5 = findPitch(score, 74);
+    Note* alto = findPitch(score, 67);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(c5);
+    ASSERT_TRUE(d5);
+    ASSERT_TRUE(alto);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    EXPECT_FALSE(emphasis.canUndo());
+    EXPECT_FALSE(emphasis.canRedo());
+
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setEditingPartId(score, "S1");
+    EXPECT_TRUE(emphasis.canUndo());
+    EXPECT_FALSE(emphasis.canRedo());
+
+    emphasis.editNote(d5);
+    EXPECT_FALSE(emphasis.partContains(d5, "S1"));
+    emphasis.editNote(c5);
+    EXPECT_TRUE(emphasis.partContains(c5, "S1"));
+
+    emphasis.undo();
+    EXPECT_FALSE(emphasis.partContains(c5, "S1"));
+    EXPECT_FALSE(emphasis.partContains(d5, "S1"));
+    EXPECT_TRUE(emphasis.canRedo());
+
+    emphasis.redo();
+    EXPECT_TRUE(emphasis.partContains(c5, "S1"));
+    EXPECT_FALSE(emphasis.partContains(d5, "S1"));
+
+    emphasis.resetPartEdits("S1");
+    EXPECT_TRUE(emphasis.partContains(d5, "S1"));
+    EXPECT_FALSE(emphasis.partContains(c5, "S1"));
+
+    emphasis.undo();
+    EXPECT_TRUE(emphasis.partContains(c5, "S1"));
+    EXPECT_FALSE(emphasis.partContains(d5, "S1"));
+
+    emphasis.redo();
+    EXPECT_TRUE(emphasis.partContains(d5, "S1"));
+    EXPECT_FALSE(emphasis.partContains(c5, "S1"));
+
+    emphasis.undo();
+    EXPECT_TRUE(emphasis.partContains(c5, "S1"));
+    emphasis.editNote(alto);
+    EXPECT_TRUE(emphasis.partContains(alto, "S1"));
+    EXPECT_TRUE(emphasis.partContains(c5, "S1"));
+    EXPECT_FALSE(emphasis.canRedo());
+
+    emphasis.undo();
+    EXPECT_FALSE(emphasis.partContains(alto, "S1"));
+    EXPECT_TRUE(emphasis.partContains(c5, "S1"));
+    emphasis.redo();
+    EXPECT_TRUE(emphasis.partContains(alto, "S1"));
+    EXPECT_FALSE(emphasis.partContains(d5, "S1"));
+
+    const std::string customId = emphasis.addCustomPart(score, "scratch", "S1");
+    ASSERT_FALSE(customId.empty());
+    EXPECT_EQ(emphasis.document().editingPartId, customId);
+    emphasis.setPartName(customId, "A");
+    emphasis.setPartName(customId, "AB");
+    emphasis.setPartName(customId, "ABC");
+    const PracticeEmphasisData::PartRule* custom = findPart(emphasis.document().parts, customId);
+    ASSERT_TRUE(custom);
+    EXPECT_EQ(custom->name, "ABC");
+    emphasis.undo();
+    custom = findPart(emphasis.document().parts, customId);
+    ASSERT_TRUE(custom);
+    EXPECT_EQ(custom->name, "scratch");
+    emphasis.undo();
+    EXPECT_EQ(findPart(emphasis.document().parts, customId), nullptr);
+
+    emphasis.redo();
+    EXPECT_TRUE(findPart(emphasis.document().parts, customId));
+    EXPECT_TRUE(emphasis.deletePart(customId));
+    EXPECT_EQ(findPart(emphasis.document().parts, customId), nullptr);
+    emphasis.undo();
+    EXPECT_TRUE(findPart(emphasis.document().parts, customId));
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, CopyFromPartIsOneUndoableStep)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    Note* e5 = findPitch(score, 76);
+    Note* c5 = findPitch(score, 72);
+    Note* d5 = findPitch(score, 74);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(c5);
+    ASSERT_TRUE(d5);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setEditingPartId(score, "S1");
+    const std::string childId = emphasis.addCustomPart(score, "from S2", "S1");
+    EXPECT_TRUE(emphasis.partContains(e5, childId));
+    EXPECT_TRUE(emphasis.partContains(d5, childId));
+    EXPECT_FALSE(emphasis.partContains(c5, childId));
+    EXPECT_FALSE(emphasis.copyFromPart(score, "S1", "S2"));
+
+    EXPECT_TRUE(emphasis.copyFromPart(score, childId, "S2"));
+    EXPECT_FALSE(emphasis.partContains(e5, childId));
+    EXPECT_TRUE(emphasis.partContains(d5, childId));
+    EXPECT_TRUE(emphasis.partContains(c5, childId));
+    EXPECT_FALSE(emphasis.copyFromPart(score, childId, "S2"));
+
+    emphasis.undo();
+    EXPECT_TRUE(emphasis.partContains(e5, childId));
+    EXPECT_TRUE(emphasis.partContains(d5, childId));
+    EXPECT_FALSE(emphasis.partContains(c5, childId));
+    EXPECT_TRUE(emphasis.canRedo());
+
+    emphasis.redo();
+    EXPECT_TRUE(emphasis.partContains(c5, childId));
+    EXPECT_FALSE(emphasis.partContains(e5, childId));
+
+    const std::string emptyId = emphasis.addCustomPart(score, "picked", {});
+    EXPECT_FALSE(emphasis.partContains(e5, emptyId));
+    EXPECT_TRUE(emphasis.copyFromPart(score, emptyId, "S1"));
+    EXPECT_TRUE(emphasis.partContains(e5, emptyId));
+    EXPECT_TRUE(emphasis.partContains(d5, emptyId));
+    EXPECT_FALSE(emphasis.partContains(c5, emptyId));
+    emphasis.undo();
+    EXPECT_FALSE(emphasis.partContains(e5, emptyId));
+    EXPECT_FALSE(emphasis.partContains(c5, emptyId));
+    EXPECT_TRUE(emphasis.canRedo());
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, EmphasisUndoIsIndependentOfScoreUndo)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+    ASSERT_TRUE(score->undoStack());
+    EXPECT_FALSE(score->undoStack()->canUndo());
+
+    Note* e5 = findPitch(score, 76);
+    Note* d5 = findPitch(score, 74);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(d5);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setEditingPartId(score, "S1");
+    emphasis.editNote(d5);
+    EXPECT_FALSE(emphasis.partContains(d5, "S1"));
+    EXPECT_FALSE(score->undoStack()->canUndo());
+
+    const PracticeEmphasisData::Document afterEdit = emphasis.document();
+    score->startCmd(TranslatableString::untranslatable("Practice emphasis tests"));
+    e5->undoChangeProperty(Pid::VISIBLE, false);
+    score->endCmd();
+    EXPECT_TRUE(score->undoStack()->canUndo());
+    EXPECT_FALSE(e5->visible());
+    EXPECT_EQ(emphasis.document(), afterEdit);
+    EXPECT_FALSE(emphasis.partContains(d5, "S1"));
+
+    score->undoRedo(true, nullptr);
+    EXPECT_TRUE(e5->visible());
+    EXPECT_EQ(emphasis.document(), afterEdit);
+    EXPECT_FALSE(emphasis.partContains(d5, "S1"));
+
+    emphasis.undo();
+    EXPECT_TRUE(emphasis.partContains(d5, "S1"));
+    EXPECT_TRUE(e5->visible());
+    EXPECT_FALSE(score->undoStack()->canUndo());
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, MissingNoteEditsStayDormantUntilSameEidReturns)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    Note* e5 = findPitch(score, 76);
+    Note* alto = findPitch(score, 67);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(alto);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setEmphasisMode(true);
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setEditingPartId(score, "S1");
+    emphasis.editNote(alto);
+    ASSERT_TRUE(alto->eid().isValid());
+    const std::string altoEid = alto->eid().toStdString();
+    EXPECT_TRUE(emphasis.partContains(alto, "S1"));
+    const PracticeEmphasisData::PartRule* soprano = findPart(emphasis.document().parts, "S1");
+    ASSERT_TRUE(soprano);
+    EXPECT_TRUE(std::find(soprano->added.begin(), soprano->added.end(), altoEid) != soprano->added.end());
+
+    score->startCmd(TranslatableString::untranslatable("Practice emphasis tests"));
+    score->select(alto);
+    score->cmdDeleteSelection();
+    score->endCmd();
+    EXPECT_EQ(findPitch(score, 67), nullptr);
+
+    soprano = findPart(emphasis.document().parts, "S1");
+    ASSERT_TRUE(soprano);
+    EXPECT_TRUE(std::find(soprano->added.begin(), soprano->added.end(), altoEid) != soprano->added.end());
+    EXPECT_TRUE(emphasis.partContains(e5, "S1"));
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+    EXPECT_EQ(emphasis.noteHighlight(e5), PracticeEmphasisData::Highlight::Edited);
+
+    score->undoRedo(true, nullptr);
+    Note* restored = findPitch(score, 67);
+    ASSERT_TRUE(restored);
+    EXPECT_EQ(restored->eid().toStdString(), altoEid);
+    EXPECT_TRUE(emphasis.partContains(restored, "S1"));
+    EXPECT_EQ(emphasis.noteHighlight(restored), PracticeEmphasisData::Highlight::EditedAdded);
+
+    score->undoRedo(false, nullptr);
+    EXPECT_EQ(findPitch(score, 67), nullptr);
+    soprano = findPart(emphasis.document().parts, "S1");
+    ASSERT_TRUE(soprano);
+    EXPECT_TRUE(std::find(soprano->added.begin(), soprano->added.end(), altoEid) != soprano->added.end());
+    EXPECT_TRUE(emphasis.partContains(e5, "S1"));
+
+    score->undoRedo(true, nullptr);
+    restored = findPitch(score, 67);
+    ASSERT_TRUE(restored);
+    EXPECT_EQ(restored->eid().toStdString(), altoEid);
+    EXPECT_TRUE(emphasis.partContains(restored, "S1"));
+
+    delete score;
 }

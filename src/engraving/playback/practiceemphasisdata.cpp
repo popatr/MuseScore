@@ -259,6 +259,7 @@ bool PracticeEmphasisData::Document::operator==(const Document& other) const
            && fromMeasure == other.fromMeasure
            && toMeasure == other.toMeasure
            && editingPartId == other.editingPartId
+           && solo == other.solo
            && parts == other.parts;
 }
 
@@ -308,6 +309,7 @@ std::vector<PracticeEmphasisData::PartRule> PracticeEmphasisData::templatesForSt
 void PracticeEmphasisData::setDocument(Document document, bool notify)
 {
     m_document = std::move(document);
+    resetHistory();
     if (notify) {
         notifyListeners();
     }
@@ -322,6 +324,7 @@ bool PracticeEmphasisData::isDefault() const
            && m_document.fromMeasure == 0
            && m_document.toMeasure == 0
            && m_document.editingPartId.empty()
+           && !m_document.solo
            && m_document.parts.empty();
 }
 
@@ -338,6 +341,7 @@ muse::ByteArray PracticeEmphasisData::toJson() const
     root.set("fromMeasure", m_document.fromMeasure);
     root.set("toMeasure", m_document.toMeasure);
     root.set("editingPartId", m_document.editingPartId);
+    root.set("solo", m_document.solo);
 
     muse::JsonArray parts;
     for (const PartRule& part : m_document.parts) {
@@ -364,6 +368,7 @@ bool PracticeEmphasisData::fromJson(const muse::ByteArray& json)
 {
     if (json.empty()) {
         m_document = Document();
+        resetHistory();
         return true;
     }
 
@@ -388,6 +393,7 @@ bool PracticeEmphasisData::fromJson(const muse::ByteArray& json)
     next.fromMeasure = std::max(0, root.value("fromMeasure").toInt());
     next.toMeasure = std::max(0, root.value("toMeasure").toInt());
     next.editingPartId = root.value("editingPartId").toStdString();
+    next.solo = root.value("solo").toBool();
 
     const muse::JsonArray parts = root.value("parts").toArray();
     for (size_t i = 0; i < parts.size(); ++i) {
@@ -418,6 +424,7 @@ bool PracticeEmphasisData::fromJson(const muse::ByteArray& json)
     }
 
     m_document = std::move(next);
+    resetHistory();
     return true;
 }
 
@@ -426,8 +433,9 @@ void PracticeEmphasisData::setPlaybackActive(bool active)
     if (m_document.playbackActive == active) {
         return;
     }
+    const Document before = m_document;
     m_document.playbackActive = active;
-    notifyListeners();
+    commitEdit(before);
 }
 
 void PracticeEmphasisData::setEmphasisMode(bool enabled)
@@ -435,8 +443,9 @@ void PracticeEmphasisData::setEmphasisMode(bool enabled)
     if (m_document.emphasisMode == enabled) {
         return;
     }
+    const Document before = m_document;
     m_document.emphasisMode = enabled;
-    notifyListeners();
+    commitEdit(before);
 }
 
 void PracticeEmphasisData::setGains(float emphasizedDb, float otherDb)
@@ -444,9 +453,10 @@ void PracticeEmphasisData::setGains(float emphasizedDb, float otherDb)
     if (m_document.emphasizedDb == emphasizedDb && m_document.otherDb == otherDb) {
         return;
     }
+    const Document before = m_document;
     m_document.emphasizedDb = emphasizedDb;
     m_document.otherDb = otherDb;
-    notifyListeners();
+    commitEdit(before);
 }
 
 void PracticeEmphasisData::setRange(int fromMeasure, int toMeasure)
@@ -456,9 +466,10 @@ void PracticeEmphasisData::setRange(int fromMeasure, int toMeasure)
     if (m_document.fromMeasure == fromMeasure && m_document.toMeasure == toMeasure) {
         return;
     }
+    const Document before = m_document;
     m_document.fromMeasure = fromMeasure;
     m_document.toMeasure = toMeasure;
-    notifyListeners();
+    commitEdit(before);
 }
 
 const PracticeEmphasisData::PartRule* PracticeEmphasisData::findPart(const std::string& id) const
@@ -565,11 +576,12 @@ void PracticeEmphasisData::setPartSelected(const Score* score, const std::string
     if (existing->selected == selected) {
         return;
     }
+    const Document before = m_document;
     existing->selected = selected;
     if (selected && m_document.editingPartId.empty()) {
         m_document.editingPartId = id;
     }
-    notifyListeners();
+    commitEdit(before);
 }
 
 void PracticeEmphasisData::setEditingPartId(const Score* score, const std::string& id)
@@ -580,8 +592,22 @@ void PracticeEmphasisData::setEditingPartId(const Score* score, const std::strin
     if (!id.empty() && !ensurePart(score, id) && !findPart(id)) {
         return;
     }
+    if (m_document.editingPartId == id) {
+        return;
+    }
+    const Document before = m_document;
     m_document.editingPartId = id;
-    notifyListeners();
+    commitEdit(before);
+}
+
+void PracticeEmphasisData::setSolo(bool enabled)
+{
+    if (m_document.solo == enabled) {
+        return;
+    }
+    const Document before = m_document;
+    m_document.solo = enabled;
+    commitEdit(before);
 }
 
 void PracticeEmphasisData::setPartName(const std::string& id, const std::string& name)
@@ -590,8 +616,9 @@ void PracticeEmphasisData::setPartName(const std::string& id, const std::string&
     if (!part || part->builtin || part->name == name) {
         return;
     }
+    const Document before = m_document;
     part->name = name;
-    notifyListeners();
+    commitEdit(before, "name:" + id);
 }
 
 bool PracticeEmphasisData::wouldCreateCycle(const std::string& childId, const std::string& parentId) const
@@ -627,6 +654,7 @@ void PracticeEmphasisData::setPartParent(const Score* score, const std::string& 
     if (nextParent == part->parentId) {
         return;
     }
+    const Document before = m_document;
     if (!nextParent.empty()) {
         if (wouldCreateCycle(id, nextParent)) {
             return;
@@ -636,7 +664,7 @@ void PracticeEmphasisData::setPartParent(const Score* score, const std::string& 
         }
     }
     part->parentId = std::move(nextParent);
-    notifyListeners();
+    commitEdit(before);
 }
 
 std::string PracticeEmphasisData::addCustomPart(const Score* score, const std::string& name, const std::string& parentId)
@@ -648,6 +676,7 @@ std::string PracticeEmphasisData::addCustomPart(const Score* score, const std::s
         id = "custom-" + std::to_string(index);
     }
 
+    const Document before = m_document;
     PartRule part;
     part.id = id;
     part.name = name.empty() ? ("Custom " + std::to_string(index)) : name;
@@ -659,7 +688,7 @@ std::string PracticeEmphasisData::addCustomPart(const Score* score, const std::s
     }
     m_document.parts.push_back(std::move(part));
     m_document.editingPartId = id;
-    notifyListeners();
+    commitEdit(before);
     return id;
 }
 
@@ -670,6 +699,7 @@ bool PracticeEmphasisData::deletePart(const std::string& id)
         return false;
     }
 
+    const Document before = m_document;
     m_document.parts.erase(std::remove_if(m_document.parts.begin(), m_document.parts.end(), [&](const PartRule& candidate) {
         return candidate.id == id;
     }), m_document.parts.end());
@@ -685,7 +715,7 @@ bool PracticeEmphasisData::deletePart(const std::string& id)
             m_document.editingPartId = m_document.parts.front().id;
         }
     }
-    notifyListeners();
+    commitEdit(before);
     return true;
 }
 
@@ -695,9 +725,10 @@ void PracticeEmphasisData::resetPartEdits(const std::string& id)
     if (!part || (part->added.empty() && part->removed.empty())) {
         return;
     }
+    const Document before = m_document;
     part->added.clear();
     part->removed.clear();
-    notifyListeners();
+    commitEdit(before);
 }
 
 bool PracticeEmphasisData::partSelected(const std::string& id) const
@@ -824,7 +855,7 @@ bool PracticeEmphasisData::partContains(const Note* note, const std::string& par
     return partContains(*part, note, visiting);
 }
 
-bool PracticeEmphasisData::isEmphasized(const Note* note) const
+bool PracticeEmphasisData::isInCheckedUnion(const Note* note) const
 {
     if (!note) {
         return false;
@@ -841,15 +872,40 @@ bool PracticeEmphasisData::isEmphasized(const Note* note) const
     return false;
 }
 
+bool PracticeEmphasisData::noteManuallyAdded(const Note* note, const std::string& partId) const
+{
+    if (!note || partId.empty()) {
+        return false;
+    }
+    const PartRule* part = findPart(partId);
+    return part && containsEid(part->added, noteEid(note));
+}
+
+bool PracticeEmphasisData::isEmphasized(const Note* note) const
+{
+    if (!note) {
+        return false;
+    }
+    if (m_document.solo) {
+        return !m_document.editingPartId.empty() && partContains(note, m_document.editingPartId);
+    }
+    return isInCheckedUnion(note);
+}
+
 PracticeEmphasisData::Highlight PracticeEmphasisData::noteHighlight(const Note* note) const
 {
     if (!note || !m_document.emphasisMode) {
         return Highlight::None;
     }
-    if (!m_document.editingPartId.empty() && partContains(note, m_document.editingPartId)) {
-        return Highlight::Edited;
+    if (!m_document.editingPartId.empty()) {
+        if (noteManuallyAdded(note, m_document.editingPartId)) {
+            return Highlight::EditedAdded;
+        }
+        if (partContains(note, m_document.editingPartId)) {
+            return Highlight::Edited;
+        }
     }
-    if (isEmphasized(note)) {
+    if (isInCheckedUnion(note)) {
         return Highlight::OtherLoud;
     }
     return Highlight::None;
@@ -859,6 +915,9 @@ bool PracticeEmphasisData::playbackEngaged() const
 {
     if (!m_document.playbackActive) {
         return false;
+    }
+    if (m_document.solo) {
+        return !m_document.editingPartId.empty();
     }
     for (const PartRule& part : m_document.parts) {
         if (part.selected) {
@@ -965,9 +1024,10 @@ void PracticeEmphasisData::editNote(Note* note)
         return;
     }
 
+    const Document before = m_document;
     m_document.editingPartId = targetId;
     toggleMembership(*part, note);
-    notifyListeners();
+    commitEdit(before);
 }
 
 std::vector<std::pair<int, int> > PracticeEmphasisData::emphasizedVoices(const Score* score) const
@@ -1000,6 +1060,135 @@ std::vector<std::pair<int, int> > PracticeEmphasisData::emphasizedVoices(const S
         }
     }
     return voices;
+}
+
+void PracticeEmphasisData::resetHistory()
+{
+    m_history.clear();
+    m_history.push_back(m_document);
+    m_historyIndex = 0;
+    m_coalesceKey.clear();
+}
+
+void PracticeEmphasisData::commitEdit(const Document& before, const std::string& coalesceKey)
+{
+    if (m_applyingHistory || before == m_document) {
+        return;
+    }
+
+    const bool coalesce = !coalesceKey.empty()
+                          && coalesceKey == m_coalesceKey
+                          && m_historyIndex > 0
+                          && m_historyIndex + 1 == m_history.size();
+    if (coalesce) {
+        m_history[m_historyIndex] = m_document;
+        notifyListeners();
+        return;
+    }
+
+    if (m_history.empty()) {
+        m_history.push_back(before);
+        m_historyIndex = 0;
+    } else {
+        m_history.resize(m_historyIndex + 1);
+        if (m_history[m_historyIndex] != before) {
+            m_history.push_back(before);
+            ++m_historyIndex;
+        }
+    }
+    m_history.push_back(m_document);
+    m_historyIndex = m_history.size() - 1;
+    m_coalesceKey = coalesceKey;
+    notifyListeners();
+}
+
+bool PracticeEmphasisData::canUndo() const
+{
+    return m_historyIndex > 0;
+}
+
+bool PracticeEmphasisData::canRedo() const
+{
+    return m_historyIndex + 1 < m_history.size();
+}
+
+void PracticeEmphasisData::undo()
+{
+    if (!canUndo()) {
+        return;
+    }
+    m_applyingHistory = true;
+    --m_historyIndex;
+    m_document = m_history[m_historyIndex];
+    m_coalesceKey.clear();
+    m_applyingHistory = false;
+    notifyListeners();
+}
+
+void PracticeEmphasisData::redo()
+{
+    if (!canRedo()) {
+        return;
+    }
+    m_applyingHistory = true;
+    ++m_historyIndex;
+    m_document = m_history[m_historyIndex];
+    m_coalesceKey.clear();
+    m_applyingHistory = false;
+    notifyListeners();
+}
+
+bool PracticeEmphasisData::copyFromPart(const Score* score, const std::string& targetId, const std::string& sourceId)
+{
+    if (!score || targetId.empty() || sourceId.empty() || targetId == sourceId) {
+        return false;
+    }
+    PartRule* target = findPart(targetId);
+    if (!target || target->builtin) {
+        return false;
+    }
+    if (!resolvePart(score, sourceId)) {
+        return false;
+    }
+
+    const Document before = m_document;
+    std::vector<std::string> added;
+    std::vector<std::string> removed;
+    Score* writable = const_cast<Score*>(score);
+    for (Measure* measure = writable->firstMeasure(); measure; measure = measure->nextMeasure()) {
+        for (Segment* segment = measure->first(SegmentType::ChordRest); segment; segment = segment->next(SegmentType::ChordRest)) {
+            for (track_idx_t track = 0; track < writable->ntracks(); ++track) {
+                EngravingItem* element = segment->element(track);
+                if (!element || !element->isChord()) {
+                    continue;
+                }
+                visitChordNotes(toChord(element), [&](const Note* note) {
+                    Note* writableNote = const_cast<Note*>(note);
+                    const std::string eid = assignNoteEid(writableNote);
+                    if (eid.empty()) {
+                        return;
+                    }
+                    const bool inSource = partContains(writableNote, sourceId);
+                    std::unordered_set<std::string> visiting;
+                    const bool inBase = baseContains(*target, writableNote, visiting);
+                    if (inSource && !inBase) {
+                        added.push_back(eid);
+                    } else if (!inSource && inBase) {
+                        removed.push_back(eid);
+                    }
+                });
+            }
+        }
+    }
+    normalizeEidList(added);
+    normalizeEidList(removed);
+    if (target->added == added && target->removed == removed) {
+        return false;
+    }
+    target->added = std::move(added);
+    target->removed = std::move(removed);
+    commitEdit(before);
+    return true;
 }
 
 void PracticeEmphasisData::notifyListeners()

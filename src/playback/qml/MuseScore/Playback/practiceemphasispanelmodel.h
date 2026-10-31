@@ -27,6 +27,7 @@
 
 #include "async/asyncable.h"
 #include "modularity/ioc.h"
+#include "rcommand/icommanddispatcher.h"
 
 #include "context/iglobalcontext.h"
 
@@ -53,13 +54,21 @@ class PracticeEmphasisPanelModel : public QObject, public muse::Contextable, pub
     Q_PROPERTY(QString editingPartName READ editingPartName NOTIFY stateChanged)
     Q_PROPERTY(bool editingPartBuiltin READ editingPartBuiltin NOTIFY stateChanged)
     Q_PROPERTY(QString editingPartParentId READ editingPartParentId NOTIFY stateChanged)
+    Q_PROPERTY(bool solo READ solo WRITE setSolo NOTIFY stateChanged)
     Q_PROPERTY(QVariantList parentOptions READ parentOptions NOTIFY stateChanged)
     Q_PROPERTY(bool canDeleteEditingPart READ canDeleteEditingPart NOTIFY stateChanged)
     Q_PROPERTY(bool debugOverrideActive READ debugOverrideActive NOTIFY stateChanged)
+    Q_PROPERTY(QString selectionButtonText READ selectionButtonText NOTIFY stateChanged)
+    Q_PROPERTY(bool canUndo READ canUndo NOTIFY stateChanged)
+    Q_PROPERTY(bool canRedo READ canRedo NOTIFY stateChanged)
+    Q_PROPERTY(QVariantList copySourceOptions READ copySourceOptions NOTIFY stateChanged)
+    Q_PROPERTY(QString copySourceId READ copySourceId WRITE setCopySourceId NOTIFY stateChanged)
+    Q_PROPERTY(bool canCopyFromPart READ canCopyFromPart NOTIFY stateChanged)
 
     QML_ELEMENT
 
     muse::ContextInject<context::IGlobalContext> globalContext = { this };
+    muse::ContextInject<muse::rcommand::ICommandDispatcher> commandDispatcher = { this };
 
 public:
     explicit PracticeEmphasisPanelModel(QObject* parent = nullptr);
@@ -67,11 +76,16 @@ public:
     Q_INVOKABLE void load();
     Q_INVOKABLE void setPartSelected(const QString& partId, bool selected);
     Q_INVOKABLE void useSelectionRange();
+    Q_INVOKABLE void clearMeasureRange();
     Q_INVOKABLE void addCustomPart();
     Q_INVOKABLE void deleteEditingPart();
     Q_INVOKABLE void resetEditingPartEdits();
     Q_INVOKABLE void applyEditingPartName(const QString& partId, const QString& name);
     Q_INVOKABLE void applyEditingPartParentId(const QString& partId, const QString& parentId);
+    Q_INVOKABLE void togglePanel();
+    Q_INVOKABLE void undo();
+    Q_INVOKABLE void redo();
+    Q_INVOKABLE void copyFromPart();
 
     bool hasScore() const;
     bool playbackActive() const;
@@ -86,9 +100,16 @@ public:
     QString editingPartName() const;
     bool editingPartBuiltin() const;
     QString editingPartParentId() const;
+    bool solo() const;
     QVariantList parentOptions() const;
     bool canDeleteEditingPart() const;
     bool debugOverrideActive() const;
+    QString selectionButtonText() const;
+    bool canUndo() const;
+    bool canRedo() const;
+    QVariantList copySourceOptions() const;
+    QString copySourceId() const;
+    bool canCopyFromPart() const;
 
     void setPlaybackActive(bool active);
     void setEmphasisMode(bool enabled);
@@ -97,6 +118,8 @@ public:
     void setFromMeasure(int measure);
     void setToMeasure(int measure);
     void setEditingPartId(const QString& partId);
+    void setSolo(bool enabled);
+    void setCopySourceId(const QString& sourceId);
 
 signals:
     void stateChanged();
@@ -107,6 +130,9 @@ private:
     void connectScore();
     void refresh();
 
+    QString resolvedCopySourceId() const;
+
     bool m_loaded = false;
+    QString m_copySourceId;
 };
 }

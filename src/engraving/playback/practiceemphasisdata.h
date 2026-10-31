@@ -47,7 +47,7 @@ class PracticeEmphasisData
 public:
     static constexpr float DEFAULT_EMPHASIZED_DB = 9.f;
     static constexpr float DEFAULT_OTHER_DB = -15.f;
-    static constexpr int CURRENT_VERSION = 2;
+    static constexpr int CURRENT_VERSION = 3;
 
     enum class Role {
         Any,
@@ -58,6 +58,7 @@ public:
     enum class Highlight {
         None,
         Edited,
+        EditedAdded,
         OtherLoud
     };
 
@@ -86,6 +87,7 @@ public:
         int fromMeasure = 0;
         int toMeasure = 0;
         std::string editingPartId;
+        bool solo = false;
         std::vector<PartRule> parts;
 
         bool operator==(const Document& other) const;
@@ -106,11 +108,18 @@ public:
     void setRange(int fromMeasure, int toMeasure);
     void setPartSelected(const Score* score, const std::string& id, bool selected);
     void setEditingPartId(const Score* score, const std::string& id);
+    void setSolo(bool enabled);
     void setPartName(const std::string& id, const std::string& name);
     void setPartParent(const Score* score, const std::string& id, const std::string& parentId);
     std::string addCustomPart(const Score* score, const std::string& name = {}, const std::string& parentId = {});
     bool deletePart(const std::string& id);
     void resetPartEdits(const std::string& id);
+    bool copyFromPart(const Score* score, const std::string& targetId, const std::string& sourceId);
+
+    bool canUndo() const;
+    bool canRedo() const;
+    void undo();
+    void redo();
 
     bool partSelected(const std::string& id) const;
     bool partContains(const Note* note, const std::string& partId) const;
@@ -134,6 +143,8 @@ private:
     bool ruleMatches(const Note* note, const PartRule& part) const;
     bool baseContains(const PartRule& part, const Note* note, std::unordered_set<std::string>& visiting) const;
     bool partContains(const PartRule& part, const Note* note, std::unordered_set<std::string>& visiting) const;
+    bool isInCheckedUnion(const Note* note) const;
+    bool noteManuallyAdded(const Note* note, const std::string& partId) const;
     int resolvedStaffIndex(const Score* score, const PartRule& part) const;
     int sourceStaffIndex(const Score* score, const PartRule& part) const;
     int sourceStaffIndex(const Score* score, const PartRule& part, std::unordered_set<std::string>& visiting) const;
@@ -141,9 +152,15 @@ private:
     bool wouldCreateCycle(const std::string& childId, const std::string& parentId) const;
     void bindStaffEid(const Score* score, PartRule& part) const;
     void toggleMembership(PartRule& part, Note* note);
+    void resetHistory();
+    void commitEdit(const Document& before, const std::string& coalesceKey = {});
     void notifyListeners();
 
     Document m_document;
+    std::vector<Document> m_history;
+    size_t m_historyIndex = 0;
+    std::string m_coalesceKey;
+    bool m_applyingHistory = false;
     muse::async::Channel<> m_changed;
 };
 }

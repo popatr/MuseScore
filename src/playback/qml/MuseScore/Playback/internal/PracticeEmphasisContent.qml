@@ -28,31 +28,31 @@ import Muse.UiComponents
 
 import MuseScore.Playback
 
-StyledPopupView {
+Item {
     id: root
 
     required property PracticeEmphasisPanelModel emphasisModel
+    property NavigationPanel navigationPanel: null
+    property int navigationOrderStart: 1
+    property bool showTitle: true
 
-    contentWidth: Math.max(560, resetButton.implicitWidth)
-    contentHeight: contentColumn.implicitHeight
-    placementPolicies: PopupView.PreferBelow | PopupView.IgnoreFit
+    readonly property bool narrow: width > 0 && width < 480
+    readonly property int partCount: root.emphasisModel.parts ? root.emphasisModel.parts.length : 0
+    readonly property int partNavStart: root.navigationOrderStart + 8
+    readonly property int editingNavStart: root.partNavStart + Math.max(root.partCount, 1)
 
-    NavigationPanel {
-        id: navPanel
-        name: "PracticeEmphasisPopup"
-        section: root.navigationSection
-        direction: NavigationPanel.Vertical
-        accessible.name: qsTrc("playback", "Practice emphasis")
-    }
+    implicitWidth: 560
+    implicitHeight: contentColumn.implicitHeight
 
     ColumnLayout {
         id: contentColumn
 
-        width: root.contentWidth
+        width: root.width
         spacing: 8
 
         StyledTextLabel {
             Layout.fillWidth: true
+            visible: root.showTitle
             text: qsTrc("playback", "Practice emphasis")
             horizontalAlignment: Text.AlignLeft
             font: ui.theme.bodyBoldFont
@@ -62,7 +62,7 @@ StyledPopupView {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             horizontalAlignment: Text.AlignLeft
-            text: qsTrc("playback", "Checked parts are loud. A shared note stays loud until every checked part that sings it is cleared. Highlight is red for the part being edited; other loud notes are faded. Click a note to add or remove it on that part only.")
+            text: qsTrc("playback", "Checked parts are loud. A shared note stays loud until every checked part that sings it is cleared. Highlight is red for the part being edited, maroon for notes you added to it; other loud notes are faded. Click a note to add or remove it on that part only.")
         }
 
         StyledTextLabel {
@@ -77,8 +77,8 @@ StyledPopupView {
             text: qsTrc("playback", "Use for playback and export")
             checked: root.emphasisModel.playbackActive
             enabled: root.emphasisModel.hasScore
-            navigation.panel: navPanel
-            navigation.order: 1
+            navigation.panel: root.navigationPanel
+            navigation.order: root.navigationOrderStart
             onClicked: root.emphasisModel.playbackActive = !checked
         }
 
@@ -87,15 +87,17 @@ StyledPopupView {
             checked: root.emphasisModel.emphasisMode
             enabled: root.emphasisModel.hasScore
             toolTipTitle: qsTrc("playback", "Highlight notes and click to edit")
-            toolTipDescription: qsTrc("playback", "Color the edited part red. Click a note to add or remove it on that part only.")
-            navigation.panel: navPanel
-            navigation.order: 2
+            toolTipDescription: qsTrc("playback", "Color added notes maroon and the rest of the edited part red. Click a note to add or remove it on that part only.")
+            navigation.panel: root.navigationPanel
+            navigation.order: root.navigationOrderStart + 1
             onClicked: root.emphasisModel.emphasisMode = !checked
         }
 
-        RowLayout {
+        GridLayout {
             Layout.fillWidth: true
-            spacing: 12
+            columns: root.narrow ? 2 : 4
+            columnSpacing: 12
+            rowSpacing: 8
 
             StyledTextLabel {
                 text: qsTrc("playback", "Emphasized")
@@ -112,8 +114,8 @@ StyledPopupView {
                 enabled: root.emphasisModel.hasScore
                 toolTipTitle: qsTrc("playback", "Emphasized")
                 toolTipDescription: qsTrc("playback", "Gain in decibels for notes that belong to a checked part.")
-                navigation.panel: navPanel
-                navigation.order: 3
+                navigation.panel: root.navigationPanel
+                navigation.order: root.navigationOrderStart + 2
                 onValueEdited: function(newValue) {
                     root.emphasisModel.emphasizedDb = newValue
                 }
@@ -134,17 +136,19 @@ StyledPopupView {
                 enabled: root.emphasisModel.hasScore
                 toolTipTitle: qsTrc("playback", "Others")
                 toolTipDescription: qsTrc("playback", "Gain in decibels for notes that do not belong to any checked part.")
-                navigation.panel: navPanel
-                navigation.order: 4
+                navigation.panel: root.navigationPanel
+                navigation.order: root.navigationOrderStart + 3
                 onValueEdited: function(newValue) {
                     root.emphasisModel.otherDb = newValue
                 }
             }
         }
 
-        RowLayout {
+        GridLayout {
             Layout.fillWidth: true
-            spacing: 12
+            columns: root.narrow ? 2 : 4
+            columnSpacing: 12
+            rowSpacing: 8
 
             StyledTextLabel {
                 text: qsTrc("playback", "Measures")
@@ -158,8 +162,8 @@ StyledPopupView {
                 step: 1
                 decimals: 0
                 enabled: root.emphasisModel.hasScore
-                navigation.panel: navPanel
-                navigation.order: 5
+                navigation.panel: root.navigationPanel
+                navigation.order: root.navigationOrderStart + 4
                 onValueEdited: function(newValue) {
                     root.emphasisModel.fromMeasure = newValue
                 }
@@ -177,26 +181,28 @@ StyledPopupView {
                 step: 1
                 decimals: 0
                 enabled: root.emphasisModel.hasScore
-                navigation.panel: navPanel
-                navigation.order: 6
+                navigation.panel: root.navigationPanel
+                navigation.order: root.navigationOrderStart + 5
                 onValueEdited: function(newValue) {
                     root.emphasisModel.toMeasure = newValue
                 }
             }
         }
 
-        RowLayout {
+        GridLayout {
             Layout.fillWidth: true
-            spacing: 8
+            columns: root.narrow ? 1 : 2
+            columnSpacing: 8
+            rowSpacing: 8
 
             FlatButton {
                 Layout.fillWidth: true
-                text: qsTrc("playback", "Selection")
+                text: root.emphasisModel.selectionButtonText
                 enabled: root.emphasisModel.hasScore
                 toolTipTitle: qsTrc("playback", "Selection")
                 toolTipDescription: qsTrc("playback", "Set the measure range from the current score selection.")
-                navigation.panel: navPanel
-                navigation.order: 7
+                navigation.panel: root.navigationPanel
+                navigation.order: root.navigationOrderStart + 6
                 onClicked: root.emphasisModel.useSelectionRange()
             }
 
@@ -206,12 +212,9 @@ StyledPopupView {
                 enabled: root.emphasisModel.hasScore
                 toolTipTitle: qsTrc("playback", "All")
                 toolTipDescription: qsTrc("playback", "Clear the measure range so emphasis uses the whole score.")
-                navigation.panel: navPanel
-                navigation.order: 8
-                onClicked: {
-                    root.emphasisModel.fromMeasure = 0
-                    root.emphasisModel.toMeasure = 0
-                }
+                navigation.panel: root.navigationPanel
+                navigation.order: root.navigationOrderStart + 7
+                onClicked: root.emphasisModel.clearMeasureRange()
             }
         }
 
@@ -224,7 +227,6 @@ StyledPopupView {
 
         Flow {
             Layout.fillWidth: true
-            Layout.preferredWidth: root.contentWidth
             spacing: 8
 
             Repeater {
@@ -232,11 +234,14 @@ StyledPopupView {
 
                 CheckBox {
                     required property var modelData
+                    property int index
                     text: modelData.label
                     checked: modelData.selected
                     enabled: modelData.available
                     toolTipTitle: modelData.label
                     toolTipDescription: modelData.tooltip
+                    navigation.panel: root.navigationPanel
+                    navigation.order: root.partNavStart + index
                     onClicked: root.emphasisModel.setPartSelected(modelData.id, !checked)
                 }
             }
@@ -249,9 +254,40 @@ StyledPopupView {
             font: ui.theme.bodyBoldFont
         }
 
-        RowLayout {
+        GridLayout {
             Layout.fillWidth: true
-            spacing: 8
+            columns: 2
+            columnSpacing: 8
+            rowSpacing: 8
+
+            FlatButton {
+                Layout.fillWidth: true
+                text: qsTrc("playback", "Undo")
+                enabled: root.emphasisModel.canUndo
+                toolTipTitle: qsTrc("playback", "Undo")
+                toolTipDescription: qsTrc("playback", "Undo the last practice-emphasis change. This does not change the score, and score Undo does not change emphasis.")
+                navigation.panel: root.navigationPanel
+                navigation.order: root.editingNavStart
+                onClicked: root.emphasisModel.undo()
+            }
+
+            FlatButton {
+                Layout.fillWidth: true
+                text: qsTrc("playback", "Redo")
+                enabled: root.emphasisModel.canRedo
+                toolTipTitle: qsTrc("playback", "Redo")
+                toolTipDescription: qsTrc("playback", "Redo the last undone practice-emphasis change. This does not change the score.")
+                navigation.panel: root.navigationPanel
+                navigation.order: root.editingNavStart + 1
+                onClicked: root.emphasisModel.redo()
+            }
+        }
+
+        GridLayout {
+            Layout.fillWidth: true
+            columns: root.narrow ? 1 : 3
+            columnSpacing: 8
+            rowSpacing: 8
 
             StyledDropdown {
                 id: editingDropdown
@@ -264,8 +300,8 @@ StyledPopupView {
                 }
                 toolTipTitle: qsTrc("playback", "Editing")
                 toolTipDescription: qsTrc("playback", "Clicks in highlight mode add or remove notes on this part only.")
-                navigation.panel: navPanel
-                navigation.order: 9
+                navigation.panel: root.navigationPanel
+                navigation.order: root.editingNavStart + 2
                 navigation.name: "EditingPartDropdown"
                 onActivated: function(index, value) {
                     root.emphasisModel.editingPartId = value
@@ -273,24 +309,37 @@ StyledPopupView {
             }
 
             FlatButton {
+                Layout.fillWidth: root.narrow
                 text: qsTrc("playback", "New")
                 enabled: root.emphasisModel.hasScore
                 toolTipTitle: qsTrc("playback", "New")
                 toolTipDescription: qsTrc("playback", "Create a custom part. Its parent starts as the part you were editing.")
-                navigation.panel: navPanel
-                navigation.order: 10
+                navigation.panel: root.navigationPanel
+                navigation.order: root.editingNavStart + 3
                 onClicked: root.emphasisModel.addCustomPart()
             }
 
             FlatButton {
+                Layout.fillWidth: root.narrow
                 text: qsTrc("playback", "Delete")
                 enabled: root.emphasisModel.canDeleteEditingPart
                 toolTipTitle: qsTrc("playback", "Delete")
                 toolTipDescription: qsTrc("playback", "Delete this custom part. Built-in SATB parts cannot be deleted.")
-                navigation.panel: navPanel
-                navigation.order: 11
+                navigation.panel: root.navigationPanel
+                navigation.order: root.editingNavStart + 4
                 onClicked: root.emphasisModel.deleteEditingPart()
             }
+        }
+
+        CheckBox {
+            text: qsTrc("playback", "Solo")
+            checked: root.emphasisModel.solo
+            enabled: root.emphasisModel.hasScore
+            toolTipTitle: qsTrc("playback", "Solo")
+            toolTipDescription: qsTrc("playback", "Playback and export use only the part being edited. Checked parts stay as they are.")
+            navigation.panel: root.navigationPanel
+            navigation.order: root.editingNavStart + 5
+            onClicked: root.emphasisModel.solo = !checked
         }
 
         Repeater {
@@ -305,9 +354,11 @@ StyledPopupView {
                 Layout.fillWidth: true
                 spacing: 8
 
-                RowLayout {
+                GridLayout {
                     Layout.fillWidth: true
-                    spacing: 8
+                    columns: root.narrow ? 1 : 2
+                    columnSpacing: 8
+                    rowSpacing: 8
 
                     StyledTextLabel {
                         text: qsTrc("playback", "Name")
@@ -316,17 +367,15 @@ StyledPopupView {
                     TextInputField {
                         Layout.fillWidth: true
                         currentText: root.emphasisModel.editingPartName
-                        navigation.panel: navPanel
-                        navigation.order: 12
+                        navigation.panel: root.navigationPanel
+                        navigation.order: root.editingNavStart + 6
+                        onTextChanged: function(newTextValue) {
+                            root.emphasisModel.applyEditingPartName(customPartEditors.modelData, newTextValue)
+                        }
                         onTextEditingFinished: function(newTextValue) {
                             root.emphasisModel.applyEditingPartName(customPartEditors.modelData, newTextValue)
                         }
                     }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
 
                     StyledTextLabel {
                         text: qsTrc("playback", "Parent")
@@ -341,14 +390,55 @@ StyledPopupView {
                         }
                         toolTipTitle: qsTrc("playback", "Parent")
                         toolTipDescription: qsTrc("playback", "Notes this part inherits before its own added and removed clicks.")
-                        navigation.panel: navPanel
-                        navigation.order: 13
+                        navigation.panel: root.navigationPanel
+                        navigation.order: root.editingNavStart + 7
                         navigation.name: "ParentPartDropdown"
                         onActivated: function(index, value) {
                             root.emphasisModel.applyEditingPartParentId(customPartEditors.modelData, value)
                         }
                     }
                 }
+            }
+        }
+
+        GridLayout {
+            Layout.fillWidth: true
+            visible: root.emphasisModel.hasScore && !root.emphasisModel.editingPartBuiltin
+            columns: root.narrow ? 1 : 3
+            columnSpacing: 8
+            rowSpacing: 8
+
+            StyledTextLabel {
+                text: qsTrc("playback", "Copy from")
+            }
+
+            StyledDropdown {
+                Layout.fillWidth: true
+                enabled: root.emphasisModel.canCopyFromPart
+                model: root.emphasisModel.copySourceOptions
+                currentIndex: {
+                    var index = indexOfValue(root.emphasisModel.copySourceId)
+                    return index >= 0 ? index : 0
+                }
+                toolTipTitle: qsTrc("playback", "Copy from")
+                toolTipDescription: qsTrc("playback", "Choose the part whose current notes will be copied onto this custom part.")
+                navigation.panel: root.navigationPanel
+                navigation.order: root.editingNavStart + 8
+                navigation.name: "CopySourceDropdown"
+                onActivated: function(index, value) {
+                    root.emphasisModel.copySourceId = value
+                }
+            }
+
+            FlatButton {
+                Layout.fillWidth: root.narrow
+                text: qsTrc("playback", "Copy")
+                enabled: root.emphasisModel.canCopyFromPart
+                toolTipTitle: qsTrc("playback", "Copy")
+                toolTipDescription: qsTrc("playback", "Copy another part’s current notes onto this custom part as its own added and removed notes, relative to its parent or to none. One undoable step.")
+                navigation.panel: root.navigationPanel
+                navigation.order: root.editingNavStart + 9
+                onClicked: root.emphasisModel.copyFromPart()
             }
         }
 
@@ -360,8 +450,8 @@ StyledPopupView {
             enabled: root.emphasisModel.hasScore
             toolTipTitle: qsTrc("playback", "Reset this part’s edits")
             toolTipDescription: qsTrc("playback", "Remove only this part’s added and removed clicks. Notes from the rule or parent come back.")
-            navigation.panel: navPanel
-            navigation.order: 14
+            navigation.panel: root.navigationPanel
+            navigation.order: root.editingNavStart + 10
             onClicked: root.emphasisModel.resetEditingPartEdits()
         }
     }

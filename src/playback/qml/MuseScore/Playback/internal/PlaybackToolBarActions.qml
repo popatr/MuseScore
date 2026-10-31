@@ -252,7 +252,7 @@ Item {
         }
     }
 
-    PopupButton {
+    FlatButton {
         id: emphasisButton
 
         anchors.left: tempoLoader.right
@@ -264,15 +264,13 @@ Item {
 
         text: qsTrc("playback", "Emphasis")
         toolTipTitle: qsTrc("playback", "Practice emphasis")
-        toolTipDescription: qsTrc("playback", "Make selected choir parts louder without changing the notation")
-        accentButton: emphasisModel.playbackActive || isPopupOpened
+        toolTipDescription: qsTrc("playback", "Show or hide the practice emphasis panel")
+        accentButton: emphasisModel.playbackActive
 
         navigation.panel: root.navPanel
         navigation.order: tempoLoader.navigationOrderEnd + 1
 
-        popupComponent: PracticeEmphasisPopup {
-            emphasisModel: emphasisModel
-        }
+        onClicked: emphasisModel.togglePanel()
     }
 
     SeparatorLine {
