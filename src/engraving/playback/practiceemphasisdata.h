@@ -114,6 +114,12 @@ public:
     std::string addCustomPart(const Score* score, const std::string& name = {}, const std::string& parentId = {});
     bool deletePart(const std::string& id);
     void resetPartEdits(const std::string& id);
+    bool copyFromPart(const Score* score, const std::string& targetId, const std::string& sourceId);
+
+    bool canUndo() const;
+    bool canRedo() const;
+    void undo();
+    void redo();
 
     bool partSelected(const std::string& id) const;
     bool partContains(const Note* note, const std::string& partId) const;
@@ -146,9 +152,15 @@ private:
     bool wouldCreateCycle(const std::string& childId, const std::string& parentId) const;
     void bindStaffEid(const Score* score, PartRule& part) const;
     void toggleMembership(PartRule& part, Note* note);
+    void resetHistory();
+    void commitEdit(const Document& before, const std::string& coalesceKey = {});
     void notifyListeners();
 
     Document m_document;
+    std::vector<Document> m_history;
+    size_t m_historyIndex = 0;
+    std::string m_coalesceKey;
+    bool m_applyingHistory = false;
     muse::async::Channel<> m_changed;
 };
 }

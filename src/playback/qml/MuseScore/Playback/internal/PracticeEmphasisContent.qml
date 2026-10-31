@@ -214,10 +214,7 @@ Item {
                 toolTipDescription: qsTrc("playback", "Clear the measure range so emphasis uses the whole score.")
                 navigation.panel: root.navigationPanel
                 navigation.order: root.navigationOrderStart + 7
-                onClicked: {
-                    root.emphasisModel.fromMeasure = 0
-                    root.emphasisModel.toMeasure = 0
-                }
+                onClicked: root.emphasisModel.clearMeasureRange()
             }
         }
 
@@ -259,6 +256,35 @@ Item {
 
         GridLayout {
             Layout.fillWidth: true
+            columns: 2
+            columnSpacing: 8
+            rowSpacing: 8
+
+            FlatButton {
+                Layout.fillWidth: true
+                text: qsTrc("playback", "Undo")
+                enabled: root.emphasisModel.canUndo
+                toolTipTitle: qsTrc("playback", "Undo")
+                toolTipDescription: qsTrc("playback", "Undo the last practice-emphasis change. This does not change the score, and score Undo does not change emphasis.")
+                navigation.panel: root.navigationPanel
+                navigation.order: root.editingNavStart
+                onClicked: root.emphasisModel.undo()
+            }
+
+            FlatButton {
+                Layout.fillWidth: true
+                text: qsTrc("playback", "Redo")
+                enabled: root.emphasisModel.canRedo
+                toolTipTitle: qsTrc("playback", "Redo")
+                toolTipDescription: qsTrc("playback", "Redo the last undone practice-emphasis change. This does not change the score.")
+                navigation.panel: root.navigationPanel
+                navigation.order: root.editingNavStart + 1
+                onClicked: root.emphasisModel.redo()
+            }
+        }
+
+        GridLayout {
+            Layout.fillWidth: true
             columns: root.narrow ? 1 : 3
             columnSpacing: 8
             rowSpacing: 8
@@ -275,7 +301,7 @@ Item {
                 toolTipTitle: qsTrc("playback", "Editing")
                 toolTipDescription: qsTrc("playback", "Clicks in highlight mode add or remove notes on this part only.")
                 navigation.panel: root.navigationPanel
-                navigation.order: root.editingNavStart
+                navigation.order: root.editingNavStart + 2
                 navigation.name: "EditingPartDropdown"
                 onActivated: function(index, value) {
                     root.emphasisModel.editingPartId = value
@@ -289,7 +315,7 @@ Item {
                 toolTipTitle: qsTrc("playback", "New")
                 toolTipDescription: qsTrc("playback", "Create a custom part. Its parent starts as the part you were editing.")
                 navigation.panel: root.navigationPanel
-                navigation.order: root.editingNavStart + 1
+                navigation.order: root.editingNavStart + 3
                 onClicked: root.emphasisModel.addCustomPart()
             }
 
@@ -300,7 +326,7 @@ Item {
                 toolTipTitle: qsTrc("playback", "Delete")
                 toolTipDescription: qsTrc("playback", "Delete this custom part. Built-in SATB parts cannot be deleted.")
                 navigation.panel: root.navigationPanel
-                navigation.order: root.editingNavStart + 2
+                navigation.order: root.editingNavStart + 4
                 onClicked: root.emphasisModel.deleteEditingPart()
             }
         }
@@ -312,7 +338,7 @@ Item {
             toolTipTitle: qsTrc("playback", "Solo")
             toolTipDescription: qsTrc("playback", "Playback and export use only the part being edited. Checked parts stay as they are.")
             navigation.panel: root.navigationPanel
-            navigation.order: root.editingNavStart + 3
+            navigation.order: root.editingNavStart + 5
             onClicked: root.emphasisModel.solo = !checked
         }
 
@@ -342,7 +368,7 @@ Item {
                         Layout.fillWidth: true
                         currentText: root.emphasisModel.editingPartName
                         navigation.panel: root.navigationPanel
-                        navigation.order: root.editingNavStart + 4
+                        navigation.order: root.editingNavStart + 6
                         onTextChanged: function(newTextValue) {
                             root.emphasisModel.applyEditingPartName(customPartEditors.modelData, newTextValue)
                         }
@@ -365,13 +391,54 @@ Item {
                         toolTipTitle: qsTrc("playback", "Parent")
                         toolTipDescription: qsTrc("playback", "Notes this part inherits before its own added and removed clicks.")
                         navigation.panel: root.navigationPanel
-                        navigation.order: root.editingNavStart + 5
+                        navigation.order: root.editingNavStart + 7
                         navigation.name: "ParentPartDropdown"
                         onActivated: function(index, value) {
                             root.emphasisModel.applyEditingPartParentId(customPartEditors.modelData, value)
                         }
                     }
                 }
+            }
+        }
+
+        GridLayout {
+            Layout.fillWidth: true
+            visible: root.emphasisModel.hasScore && !root.emphasisModel.editingPartBuiltin
+            columns: root.narrow ? 1 : 3
+            columnSpacing: 8
+            rowSpacing: 8
+
+            StyledTextLabel {
+                text: qsTrc("playback", "Copy from")
+            }
+
+            StyledDropdown {
+                Layout.fillWidth: true
+                enabled: root.emphasisModel.canCopyFromPart
+                model: root.emphasisModel.copySourceOptions
+                currentIndex: {
+                    var index = indexOfValue(root.emphasisModel.copySourceId)
+                    return index >= 0 ? index : 0
+                }
+                toolTipTitle: qsTrc("playback", "Copy from")
+                toolTipDescription: qsTrc("playback", "Choose the part whose current notes will be copied onto this custom part.")
+                navigation.panel: root.navigationPanel
+                navigation.order: root.editingNavStart + 8
+                navigation.name: "CopySourceDropdown"
+                onActivated: function(index, value) {
+                    root.emphasisModel.copySourceId = value
+                }
+            }
+
+            FlatButton {
+                Layout.fillWidth: root.narrow
+                text: qsTrc("playback", "Copy")
+                enabled: root.emphasisModel.canCopyFromPart
+                toolTipTitle: qsTrc("playback", "Copy")
+                toolTipDescription: qsTrc("playback", "Copy another part’s current notes onto this custom part as its own added and removed notes, relative to its parent or to none. One undoable step.")
+                navigation.panel: root.navigationPanel
+                navigation.order: root.editingNavStart + 9
+                onClicked: root.emphasisModel.copyFromPart()
             }
         }
 
@@ -384,7 +451,7 @@ Item {
             toolTipTitle: qsTrc("playback", "Reset this part’s edits")
             toolTipDescription: qsTrc("playback", "Remove only this part’s added and removed clicks. Notes from the rule or parent come back.")
             navigation.panel: root.navigationPanel
-            navigation.order: root.editingNavStart + 6
+            navigation.order: root.editingNavStart + 10
             onClicked: root.emphasisModel.resetEditingPartEdits()
         }
     }
