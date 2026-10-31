@@ -37,6 +37,9 @@ Item {
     property bool showTitle: true
 
     readonly property bool narrow: width > 0 && width < 480
+    readonly property int partCount: root.emphasisModel.parts ? root.emphasisModel.parts.length : 0
+    readonly property int partNavStart: root.navigationOrderStart + 8
+    readonly property int editingNavStart: root.partNavStart + Math.max(root.partCount, 1)
 
     implicitWidth: 560
     implicitHeight: contentColumn.implicitHeight
@@ -59,7 +62,7 @@ Item {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             horizontalAlignment: Text.AlignLeft
-            text: qsTrc("playback", "Checked parts are loud. A shared note stays loud until every checked part that sings it is cleared. Highlight is red for the part being edited; other loud notes are faded. Click a note to add or remove it on that part only.")
+            text: qsTrc("playback", "Checked parts are loud. A shared note stays loud until every checked part that sings it is cleared. Highlight is red for the part being edited, maroon for notes you added to it; other loud notes are faded. Click a note to add or remove it on that part only.")
         }
 
         StyledTextLabel {
@@ -84,7 +87,7 @@ Item {
             checked: root.emphasisModel.emphasisMode
             enabled: root.emphasisModel.hasScore
             toolTipTitle: qsTrc("playback", "Highlight notes and click to edit")
-            toolTipDescription: qsTrc("playback", "Color the edited part red. Click a note to add or remove it on that part only.")
+            toolTipDescription: qsTrc("playback", "Color added notes maroon and the rest of the edited part red. Click a note to add or remove it on that part only.")
             navigation.panel: root.navigationPanel
             navigation.order: root.navigationOrderStart + 1
             onClicked: root.emphasisModel.emphasisMode = !checked
@@ -194,7 +197,7 @@ Item {
 
             FlatButton {
                 Layout.fillWidth: true
-                text: qsTrc("playback", "Selection")
+                text: root.emphasisModel.selectionButtonText
                 enabled: root.emphasisModel.hasScore
                 toolTipTitle: qsTrc("playback", "Selection")
                 toolTipDescription: qsTrc("playback", "Set the measure range from the current score selection.")
@@ -234,11 +237,14 @@ Item {
 
                 CheckBox {
                     required property var modelData
+                    property int index
                     text: modelData.label
                     checked: modelData.selected
                     enabled: modelData.available
                     toolTipTitle: modelData.label
                     toolTipDescription: modelData.tooltip
+                    navigation.panel: root.navigationPanel
+                    navigation.order: root.partNavStart + index
                     onClicked: root.emphasisModel.setPartSelected(modelData.id, !checked)
                 }
             }
@@ -269,7 +275,7 @@ Item {
                 toolTipTitle: qsTrc("playback", "Editing")
                 toolTipDescription: qsTrc("playback", "Clicks in highlight mode add or remove notes on this part only.")
                 navigation.panel: root.navigationPanel
-                navigation.order: root.navigationOrderStart + 8
+                navigation.order: root.editingNavStart
                 navigation.name: "EditingPartDropdown"
                 onActivated: function(index, value) {
                     root.emphasisModel.editingPartId = value
@@ -283,7 +289,7 @@ Item {
                 toolTipTitle: qsTrc("playback", "New")
                 toolTipDescription: qsTrc("playback", "Create a custom part. Its parent starts as the part you were editing.")
                 navigation.panel: root.navigationPanel
-                navigation.order: root.navigationOrderStart + 9
+                navigation.order: root.editingNavStart + 1
                 onClicked: root.emphasisModel.addCustomPart()
             }
 
@@ -294,9 +300,20 @@ Item {
                 toolTipTitle: qsTrc("playback", "Delete")
                 toolTipDescription: qsTrc("playback", "Delete this custom part. Built-in SATB parts cannot be deleted.")
                 navigation.panel: root.navigationPanel
-                navigation.order: root.navigationOrderStart + 10
+                navigation.order: root.editingNavStart + 2
                 onClicked: root.emphasisModel.deleteEditingPart()
             }
+        }
+
+        CheckBox {
+            text: qsTrc("playback", "Solo")
+            checked: root.emphasisModel.solo
+            enabled: root.emphasisModel.hasScore
+            toolTipTitle: qsTrc("playback", "Solo")
+            toolTipDescription: qsTrc("playback", "Playback and export use only the part being edited. Checked parts stay as they are.")
+            navigation.panel: root.navigationPanel
+            navigation.order: root.editingNavStart + 3
+            onClicked: root.emphasisModel.solo = !checked
         }
 
         Repeater {
@@ -325,7 +342,10 @@ Item {
                         Layout.fillWidth: true
                         currentText: root.emphasisModel.editingPartName
                         navigation.panel: root.navigationPanel
-                        navigation.order: root.navigationOrderStart + 11
+                        navigation.order: root.editingNavStart + 4
+                        onTextChanged: function(newTextValue) {
+                            root.emphasisModel.applyEditingPartName(customPartEditors.modelData, newTextValue)
+                        }
                         onTextEditingFinished: function(newTextValue) {
                             root.emphasisModel.applyEditingPartName(customPartEditors.modelData, newTextValue)
                         }
@@ -345,7 +365,7 @@ Item {
                         toolTipTitle: qsTrc("playback", "Parent")
                         toolTipDescription: qsTrc("playback", "Notes this part inherits before its own added and removed clicks.")
                         navigation.panel: root.navigationPanel
-                        navigation.order: root.navigationOrderStart + 12
+                        navigation.order: root.editingNavStart + 5
                         navigation.name: "ParentPartDropdown"
                         onActivated: function(index, value) {
                             root.emphasisModel.applyEditingPartParentId(customPartEditors.modelData, value)
@@ -364,7 +384,7 @@ Item {
             toolTipTitle: qsTrc("playback", "Reset this part’s edits")
             toolTipDescription: qsTrc("playback", "Remove only this part’s added and removed clicks. Notes from the rule or parent come back.")
             navigation.panel: root.navigationPanel
-            navigation.order: root.navigationOrderStart + 13
+            navigation.order: root.editingNavStart + 6
             onClicked: root.emphasisModel.resetEditingPartEdits()
         }
     }

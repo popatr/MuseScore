@@ -217,6 +217,8 @@ void NotationPainting::paintView(Painter* painter, const RectF& frameRect, bool 
                 return defaultColor;
             }
             switch (master->practiceEmphasis().noteHighlight(note)) {
+            case PracticeEmphasisData::Highlight::EditedAdded:
+                return Color(128, 24, 48);
             case PracticeEmphasisData::Highlight::Edited:
                 return Color(224, 32, 48);
             case PracticeEmphasisData::Highlight::OtherLoud:

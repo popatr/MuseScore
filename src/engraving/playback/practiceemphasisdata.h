@@ -47,7 +47,7 @@ class PracticeEmphasisData
 public:
     static constexpr float DEFAULT_EMPHASIZED_DB = 9.f;
     static constexpr float DEFAULT_OTHER_DB = -15.f;
-    static constexpr int CURRENT_VERSION = 2;
+    static constexpr int CURRENT_VERSION = 3;
 
     enum class Role {
         Any,
@@ -58,6 +58,7 @@ public:
     enum class Highlight {
         None,
         Edited,
+        EditedAdded,
         OtherLoud
     };
 
@@ -86,6 +87,7 @@ public:
         int fromMeasure = 0;
         int toMeasure = 0;
         std::string editingPartId;
+        bool solo = false;
         std::vector<PartRule> parts;
 
         bool operator==(const Document& other) const;
@@ -106,6 +108,7 @@ public:
     void setRange(int fromMeasure, int toMeasure);
     void setPartSelected(const Score* score, const std::string& id, bool selected);
     void setEditingPartId(const Score* score, const std::string& id);
+    void setSolo(bool enabled);
     void setPartName(const std::string& id, const std::string& name);
     void setPartParent(const Score* score, const std::string& id, const std::string& parentId);
     std::string addCustomPart(const Score* score, const std::string& name = {}, const std::string& parentId = {});
@@ -134,6 +137,8 @@ private:
     bool ruleMatches(const Note* note, const PartRule& part) const;
     bool baseContains(const PartRule& part, const Note* note, std::unordered_set<std::string>& visiting) const;
     bool partContains(const PartRule& part, const Note* note, std::unordered_set<std::string>& visiting) const;
+    bool isInCheckedUnion(const Note* note) const;
+    bool noteManuallyAdded(const Note* note, const std::string& partId) const;
     int resolvedStaffIndex(const Score* score, const PartRule& part) const;
     int sourceStaffIndex(const Score* score, const PartRule& part) const;
     int sourceStaffIndex(const Score* score, const PartRule& part, std::unordered_set<std::string>& visiting) const;

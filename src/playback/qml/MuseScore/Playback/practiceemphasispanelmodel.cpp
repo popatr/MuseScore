@@ -27,6 +27,8 @@
 
 #include "translation.h"
 
+#include "rcommand/commandtypes.h"
+
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/measurebase.h"
@@ -203,6 +205,13 @@ void PracticeEmphasisPanelModel::connectScore()
             refresh();
         }, muse::async::Asyncable::Mode::SetReplace);
     }
+
+    if (!globalContext() || !globalContext()->currentNotation() || !globalContext()->currentNotation()->interaction()) {
+        return;
+    }
+    globalContext()->currentNotation()->interaction()->selectionChanged().onNotify(this, [this]() {
+        refresh();
+    }, muse::async::Asyncable::Mode::SetReplace);
 }
 
 void PracticeEmphasisPanelModel::refresh()
@@ -325,6 +334,12 @@ QString PracticeEmphasisPanelModel::editingPartParentId() const
     return {};
 }
 
+bool PracticeEmphasisPanelModel::solo() const
+{
+    const PracticeEmphasisData* emphasis = data();
+    return emphasis && emphasis->document().solo;
+}
+
 QVariantList PracticeEmphasisPanelModel::parentOptions() const
 {
     QVariantList list;
@@ -355,6 +370,29 @@ bool PracticeEmphasisPanelModel::canDeleteEditingPart() const
 bool PracticeEmphasisPanelModel::debugOverrideActive() const
 {
     return PracticeEmphasis::debugOverrideActive();
+}
+
+QString PracticeEmphasisPanelModel::selectionButtonText() const
+{
+    if (!globalContext() || !globalContext()->currentNotation() || !globalContext()->currentNotation()->interaction()) {
+        return muse::qtrc("playback", "Selection");
+    }
+    const INotationSelectionPtr selection = globalContext()->currentNotation()->interaction()->selection();
+    if (!selection) {
+        return muse::qtrc("playback", "Selection");
+    }
+    const int from = displayedMeasureNumber(selection->startMeasureBase());
+    int to = displayedMeasureNumber(selection->endMeasureBase());
+    if (from <= 0) {
+        return muse::qtrc("playback", "Selection");
+    }
+    if (to <= 0) {
+        to = from;
+    }
+    if (from == to) {
+        return muse::qtrc("playback", "Selection (%1)").arg(from);
+    }
+    return muse::qtrc("playback", "Selection (%1–%2)").arg(from).arg(to);
 }
 
 void PracticeEmphasisPanelModel::setPlaybackActive(bool active)
@@ -437,6 +475,27 @@ void PracticeEmphasisPanelModel::setEditingPartId(const QString& partId)
         return;
     }
     master->practiceEmphasis().setEditingPartId(master, partId.toStdString());
+}
+
+void PracticeEmphasisPanelModel::setSolo(bool enabled)
+{
+    PracticeEmphasisData* emphasis = data();
+    MasterScore* master = currentMaster();
+    if (!emphasis || !master) {
+        return;
+    }
+    if (enabled && emphasis->document().editingPartId.empty()) {
+        emphasis->setEditingPartId(master, "S1");
+    }
+    emphasis->setSolo(enabled);
+}
+
+void PracticeEmphasisPanelModel::togglePanel()
+{
+    if (!commandDispatcher()) {
+        return;
+    }
+    commandDispatcher()->dispatch(muse::rcommand::Command("command://app/dock/toggle-practice-emphasis"));
 }
 
 void PracticeEmphasisPanelModel::applyEditingPartName(const QString& partId, const QString& name)

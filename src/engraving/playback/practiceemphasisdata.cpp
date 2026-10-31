@@ -259,6 +259,7 @@ bool PracticeEmphasisData::Document::operator==(const Document& other) const
            && fromMeasure == other.fromMeasure
            && toMeasure == other.toMeasure
            && editingPartId == other.editingPartId
+           && solo == other.solo
            && parts == other.parts;
 }
 
@@ -322,6 +323,7 @@ bool PracticeEmphasisData::isDefault() const
            && m_document.fromMeasure == 0
            && m_document.toMeasure == 0
            && m_document.editingPartId.empty()
+           && !m_document.solo
            && m_document.parts.empty();
 }
 
@@ -338,6 +340,7 @@ muse::ByteArray PracticeEmphasisData::toJson() const
     root.set("fromMeasure", m_document.fromMeasure);
     root.set("toMeasure", m_document.toMeasure);
     root.set("editingPartId", m_document.editingPartId);
+    root.set("solo", m_document.solo);
 
     muse::JsonArray parts;
     for (const PartRule& part : m_document.parts) {
@@ -388,6 +391,7 @@ bool PracticeEmphasisData::fromJson(const muse::ByteArray& json)
     next.fromMeasure = std::max(0, root.value("fromMeasure").toInt());
     next.toMeasure = std::max(0, root.value("toMeasure").toInt());
     next.editingPartId = root.value("editingPartId").toStdString();
+    next.solo = root.value("solo").toBool();
 
     const muse::JsonArray parts = root.value("parts").toArray();
     for (size_t i = 0; i < parts.size(); ++i) {
@@ -581,6 +585,15 @@ void PracticeEmphasisData::setEditingPartId(const Score* score, const std::strin
         return;
     }
     m_document.editingPartId = id;
+    notifyListeners();
+}
+
+void PracticeEmphasisData::setSolo(bool enabled)
+{
+    if (m_document.solo == enabled) {
+        return;
+    }
+    m_document.solo = enabled;
     notifyListeners();
 }
 
@@ -824,7 +837,7 @@ bool PracticeEmphasisData::partContains(const Note* note, const std::string& par
     return partContains(*part, note, visiting);
 }
 
-bool PracticeEmphasisData::isEmphasized(const Note* note) const
+bool PracticeEmphasisData::isInCheckedUnion(const Note* note) const
 {
     if (!note) {
         return false;
@@ -841,15 +854,40 @@ bool PracticeEmphasisData::isEmphasized(const Note* note) const
     return false;
 }
 
+bool PracticeEmphasisData::noteManuallyAdded(const Note* note, const std::string& partId) const
+{
+    if (!note || partId.empty()) {
+        return false;
+    }
+    const PartRule* part = findPart(partId);
+    return part && containsEid(part->added, noteEid(note));
+}
+
+bool PracticeEmphasisData::isEmphasized(const Note* note) const
+{
+    if (!note) {
+        return false;
+    }
+    if (m_document.solo) {
+        return !m_document.editingPartId.empty() && partContains(note, m_document.editingPartId);
+    }
+    return isInCheckedUnion(note);
+}
+
 PracticeEmphasisData::Highlight PracticeEmphasisData::noteHighlight(const Note* note) const
 {
     if (!note || !m_document.emphasisMode) {
         return Highlight::None;
     }
-    if (!m_document.editingPartId.empty() && partContains(note, m_document.editingPartId)) {
-        return Highlight::Edited;
+    if (!m_document.editingPartId.empty()) {
+        if (noteManuallyAdded(note, m_document.editingPartId)) {
+            return Highlight::EditedAdded;
+        }
+        if (partContains(note, m_document.editingPartId)) {
+            return Highlight::Edited;
+        }
     }
-    if (isEmphasized(note)) {
+    if (isInCheckedUnion(note)) {
         return Highlight::OtherLoud;
     }
     return Highlight::None;
@@ -859,6 +897,9 @@ bool PracticeEmphasisData::playbackEngaged() const
 {
     if (!m_document.playbackActive) {
         return false;
+    }
+    if (m_document.solo) {
+        return !m_document.editingPartId.empty();
     }
     for (const PartRule& part : m_document.parts) {
         if (part.selected) {

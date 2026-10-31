@@ -945,7 +945,7 @@ TEST_F(Engraving_PracticeEmphasisTests, ClickSwitchesEditingPartByStaffAndManual
     EXPECT_EQ(emphasis.document().editingPartId, "S1");
     EXPECT_TRUE(emphasis.partContains(alto, "S1"));
     EXPECT_EQ(emphasis.noteHighlight(e5), PracticeEmphasisData::Highlight::Edited);
-    EXPECT_EQ(emphasis.noteHighlight(alto), PracticeEmphasisData::Highlight::Edited);
+    EXPECT_EQ(emphasis.noteHighlight(alto), PracticeEmphasisData::Highlight::EditedAdded);
 
     emphasis.editNote(tenor);
     EXPECT_EQ(emphasis.document().editingPartId, "T1");
@@ -1009,6 +1009,129 @@ TEST_F(Engraving_PracticeEmphasisTests, CustomPartNameAndParentSurviveEditingSwi
     ASSERT_TRUE(custom);
     EXPECT_EQ(custom->name, "sops");
     EXPECT_EQ(custom->parentId, "A1");
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, SoloUsesOnlyEditingPartWithoutChangingChecks)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    Note* e5 = findPitch(score, 76);
+    Note* alto = findPitch(score, 67);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(alto);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPlaybackActive(true);
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setPartSelected(score, "A1", true);
+    emphasis.setEditingPartId(score, "S1");
+
+    EXPECT_TRUE(emphasis.partSelected("S1"));
+    EXPECT_TRUE(emphasis.partSelected("A1"));
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+    EXPECT_TRUE(emphasis.isEmphasized(alto));
+    EXPECT_TRUE(emphasis.playbackEngaged());
+
+    emphasis.setSolo(true);
+    EXPECT_TRUE(emphasis.document().solo);
+    EXPECT_TRUE(emphasis.partSelected("S1"));
+    EXPECT_TRUE(emphasis.partSelected("A1"));
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+    EXPECT_FALSE(emphasis.isEmphasized(alto));
+    EXPECT_TRUE(emphasis.playbackEngaged());
+
+    emphasis.setEditingPartId(score, "A1");
+    EXPECT_FALSE(emphasis.isEmphasized(e5));
+    EXPECT_TRUE(emphasis.isEmphasized(alto));
+
+    emphasis.setSolo(false);
+    EXPECT_FALSE(emphasis.document().solo);
+    EXPECT_TRUE(emphasis.partSelected("S1"));
+    EXPECT_TRUE(emphasis.partSelected("A1"));
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+    EXPECT_TRUE(emphasis.isEmphasized(alto));
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, AddedNotesHighlightAsEditedAdded)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    Note* e5 = findPitch(score, 76);
+    Note* c5 = findPitch(score, 72);
+    Note* alto = findPitch(score, 67);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(c5);
+    ASSERT_TRUE(alto);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setEmphasisMode(true);
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setPartSelected(score, "S2", true);
+    emphasis.setEditingPartId(score, "S1");
+
+    EXPECT_EQ(emphasis.noteHighlight(e5), PracticeEmphasisData::Highlight::Edited);
+    EXPECT_EQ(emphasis.noteHighlight(c5), PracticeEmphasisData::Highlight::OtherLoud);
+    EXPECT_EQ(emphasis.noteHighlight(alto), PracticeEmphasisData::Highlight::None);
+
+    emphasis.editNote(alto);
+    EXPECT_TRUE(emphasis.partContains(alto, "S1"));
+    EXPECT_EQ(emphasis.noteHighlight(alto), PracticeEmphasisData::Highlight::EditedAdded);
+    EXPECT_EQ(emphasis.noteHighlight(e5), PracticeEmphasisData::Highlight::Edited);
+
+    emphasis.editNote(e5);
+    EXPECT_FALSE(emphasis.partContains(e5, "S1"));
+    EXPECT_EQ(emphasis.noteHighlight(e5), PracticeEmphasisData::Highlight::None);
+    EXPECT_EQ(emphasis.noteHighlight(alto), PracticeEmphasisData::Highlight::EditedAdded);
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, SidecarRoundTripsSoloAndOlderFilesDefaultOff)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPlaybackActive(true);
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setEditingPartId(score, "S1");
+    emphasis.setSolo(true);
+
+    PracticeEmphasisData parsed;
+    EXPECT_TRUE(parsed.fromJson(emphasis.toJson()));
+    EXPECT_EQ(parsed.document().version, PracticeEmphasisData::CURRENT_VERSION);
+    EXPECT_TRUE(parsed.document().solo);
+    EXPECT_EQ(parsed.document(), emphasis.document());
+
+    ByteArray mscz;
+    ASSERT_TRUE(writeMscz(score, mscz));
+    ByteArray json;
+    ASSERT_TRUE(containerHasEmphasis(mscz, &json));
+    PracticeEmphasisData fromContainer;
+    EXPECT_TRUE(fromContainer.fromJson(json));
+    EXPECT_TRUE(fromContainer.document().solo);
+    EXPECT_EQ(fromContainer.document(), emphasis.document());
+
+    PracticeEmphasisData legacy;
+    const muse::ByteArray v2(
+        "{"
+        "\"version\":2,"
+        "\"playbackActive\":true,"
+        "\"editingPartId\":\"S1\","
+        "\"parts\":[{\"id\":\"S1\",\"name\":\"1st soprano\",\"staffIndex\":0,\"voice\":0,\"role\":\"top\",\"selected\":true}]"
+        "}");
+    EXPECT_TRUE(legacy.fromJson(v2));
+    EXPECT_FALSE(legacy.document().solo);
+    EXPECT_EQ(legacy.document().version, PracticeEmphasisData::CURRENT_VERSION);
 
     delete score;
 }

@@ -71,7 +71,6 @@ qt_add_qml_module(playback_qml
         internal/MixerVolumeSection.qml
         internal/PlaybackSpeedPopup.qml
         internal/PracticeEmphasisContent.qml
-        internal/PracticeEmphasisPopup.qml
         internal/PlaybackSpeedSlider.qml
         internal/PlaybackToolBarActions.qml
         internal/SoundFlag/MuseSoundsParams.qml
