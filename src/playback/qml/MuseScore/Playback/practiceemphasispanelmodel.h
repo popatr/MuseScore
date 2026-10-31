@@ -50,9 +50,9 @@ class PracticeEmphasisPanelModel : public QObject, public muse::Contextable, pub
     Q_PROPERTY(QVariantList parts READ parts NOTIFY stateChanged)
     Q_PROPERTY(QVariantList editingPartOptions READ editingPartOptions NOTIFY stateChanged)
     Q_PROPERTY(QString editingPartId READ editingPartId WRITE setEditingPartId NOTIFY stateChanged)
-    Q_PROPERTY(QString editingPartName READ editingPartName WRITE setEditingPartName NOTIFY stateChanged)
+    Q_PROPERTY(QString editingPartName READ editingPartName NOTIFY stateChanged)
     Q_PROPERTY(bool editingPartBuiltin READ editingPartBuiltin NOTIFY stateChanged)
-    Q_PROPERTY(QString editingPartParentId READ editingPartParentId WRITE setEditingPartParentId NOTIFY stateChanged)
+    Q_PROPERTY(QString editingPartParentId READ editingPartParentId NOTIFY stateChanged)
     Q_PROPERTY(QVariantList parentOptions READ parentOptions NOTIFY stateChanged)
     Q_PROPERTY(bool canDeleteEditingPart READ canDeleteEditingPart NOTIFY stateChanged)
     Q_PROPERTY(bool debugOverrideActive READ debugOverrideActive NOTIFY stateChanged)
@@ -70,6 +70,8 @@ public:
     Q_INVOKABLE void addCustomPart();
     Q_INVOKABLE void deleteEditingPart();
     Q_INVOKABLE void resetEditingPartEdits();
+    Q_INVOKABLE void applyEditingPartName(const QString& partId, const QString& name);
+    Q_INVOKABLE void applyEditingPartParentId(const QString& partId, const QString& parentId);
 
     bool hasScore() const;
     bool playbackActive() const;
@@ -95,8 +97,6 @@ public:
     void setFromMeasure(int measure);
     void setToMeasure(int measure);
     void setEditingPartId(const QString& partId);
-    void setEditingPartName(const QString& name);
-    void setEditingPartParentId(const QString& parentId);
 
 signals:
     void stateChanged();

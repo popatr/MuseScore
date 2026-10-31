@@ -99,6 +99,38 @@ QString dropdownLabel(const PracticeEmphasisData::PartRule& part)
     return QString::fromStdString(part.id);
 }
 
+QString partCheckboxTooltip(const PracticeEmphasisData::PartRule& part)
+{
+    if (!part.builtin) {
+        return muse::qtrc("playback", "Check to include this custom part in the loud mix.");
+    }
+    if (part.id == "S1") {
+        return muse::qtrc("playback", "1st soprano: top notes on the soprano staff. A unison belongs to both 1st and 2nd.");
+    }
+    if (part.id == "S2") {
+        return muse::qtrc("playback", "2nd soprano: notes below the top on the soprano staff.");
+    }
+    if (part.id == "A1") {
+        return muse::qtrc("playback", "1st alto: top notes on the alto staff. Closed SATB shares the upper staff with soprano.");
+    }
+    if (part.id == "A2") {
+        return muse::qtrc("playback", "2nd alto: notes below the top on the alto staff.");
+    }
+    if (part.id == "T1") {
+        return muse::qtrc("playback", "1st tenor: top notes on the tenor staff. Closed SATB shares the lower staff with bass.");
+    }
+    if (part.id == "T2") {
+        return muse::qtrc("playback", "2nd tenor: notes below the top on the tenor staff.");
+    }
+    if (part.id == "B1") {
+        return muse::qtrc("playback", "1st bass: top notes on the bass staff.");
+    }
+    if (part.id == "B2") {
+        return muse::qtrc("playback", "2nd bass: notes below the top on the bass staff.");
+    }
+    return dropdownLabel(part);
+}
+
 bool isDescendantOf(const std::vector<PracticeEmphasisData::PartRule>& parts, const std::string& candidateId, const std::string& ancestorId)
 {
     if (candidateId.empty() || ancestorId.empty() || candidateId == ancestorId) {
@@ -231,6 +263,7 @@ QVariantList PracticeEmphasisPanelModel::parts() const
         item.insert(QStringLiteral("id"), QString::fromStdString(part.id));
         item.insert(QStringLiteral("label"), part.builtin ? QString::fromStdString(part.id)
                     : dropdownLabel(part));
+        item.insert(QStringLiteral("tooltip"), partCheckboxTooltip(part));
         item.insert(QStringLiteral("selected"), master && master->practiceEmphasis().partSelected(part.id));
         item.insert(QStringLiteral("available"), master && (part.builtin ? part.staffIndex < staves : true));
         list.push_back(item);
@@ -406,23 +439,23 @@ void PracticeEmphasisPanelModel::setEditingPartId(const QString& partId)
     master->practiceEmphasis().setEditingPartId(master, partId.toStdString());
 }
 
-void PracticeEmphasisPanelModel::setEditingPartName(const QString& name)
+void PracticeEmphasisPanelModel::applyEditingPartName(const QString& partId, const QString& name)
 {
     PracticeEmphasisData* emphasis = data();
-    if (!emphasis) {
+    if (!emphasis || partId.isEmpty() || partId != editingPartId()) {
         return;
     }
-    emphasis->setPartName(emphasis->document().editingPartId, name.toStdString());
+    emphasis->setPartName(partId.toStdString(), name.toStdString());
 }
 
-void PracticeEmphasisPanelModel::setEditingPartParentId(const QString& parentId)
+void PracticeEmphasisPanelModel::applyEditingPartParentId(const QString& partId, const QString& parentId)
 {
     MasterScore* master = currentMaster();
     PracticeEmphasisData* emphasis = data();
-    if (!master || !emphasis) {
+    if (!master || !emphasis || partId.isEmpty() || partId != editingPartId()) {
         return;
     }
-    emphasis->setPartParent(master, emphasis->document().editingPartId, parentId.toStdString());
+    emphasis->setPartParent(master, partId.toStdString(), parentId.toStdString());
 }
 
 void PracticeEmphasisPanelModel::useSelectionRange()

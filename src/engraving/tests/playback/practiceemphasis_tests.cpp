@@ -963,6 +963,56 @@ TEST_F(Engraving_PracticeEmphasisTests, ClickSwitchesEditingPartByStaffAndManual
     delete score;
 }
 
+TEST_F(Engraving_PracticeEmphasisTests, CustomPartNameAndParentSurviveEditingSwitch)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setEditingPartId(score, "S1");
+    const std::string customId = emphasis.addCustomPart(score, "sops", "S1");
+    ASSERT_FALSE(customId.empty());
+    EXPECT_EQ(emphasis.document().editingPartId, customId);
+
+    const PracticeEmphasisData::PartRule* custom = findPart(emphasis.document().parts, customId);
+    ASSERT_TRUE(custom);
+    EXPECT_EQ(custom->name, "sops");
+    EXPECT_EQ(custom->parentId, "S1");
+    EXPECT_FALSE(custom->builtin);
+
+    emphasis.setEditingPartId(score, "S1");
+    EXPECT_EQ(emphasis.document().editingPartId, "S1");
+    emphasis.setPartName("S1", "renamed builtin");
+    emphasis.setPartParent(score, "S1", "S2");
+
+    const PracticeEmphasisData::PartRule* soprano = findPart(emphasis.document().parts, "S1");
+    ASSERT_TRUE(soprano);
+    EXPECT_TRUE(soprano->builtin);
+    EXPECT_EQ(soprano->name, "1st soprano");
+    EXPECT_TRUE(soprano->parentId.empty());
+
+    custom = findPart(emphasis.document().parts, customId);
+    ASSERT_TRUE(custom);
+    EXPECT_EQ(custom->name, "sops");
+    EXPECT_EQ(custom->parentId, "S1");
+
+    emphasis.setEditingPartId(score, customId);
+    custom = findPart(emphasis.document().parts, customId);
+    ASSERT_TRUE(custom);
+    EXPECT_EQ(custom->name, "sops");
+    EXPECT_EQ(custom->parentId, "S1");
+
+    emphasis.setPartName(customId, "sops");
+    emphasis.setPartParent(score, customId, "A1");
+    custom = findPart(emphasis.document().parts, customId);
+    ASSERT_TRUE(custom);
+    EXPECT_EQ(custom->name, "sops");
+    EXPECT_EQ(custom->parentId, "A1");
+
+    delete score;
+}
+
 TEST(Engraving_PracticeEmphasis, VersionOneOverridesAreIgnored)
 {
     PracticeEmphasisData parsed;

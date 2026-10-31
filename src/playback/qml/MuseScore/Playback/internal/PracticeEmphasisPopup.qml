@@ -33,8 +33,9 @@ StyledPopupView {
 
     required property PracticeEmphasisPanelModel emphasisModel
 
-    contentWidth: 520
+    contentWidth: Math.max(560, resetButton.implicitWidth)
     contentHeight: contentColumn.implicitHeight
+    placementPolicies: PopupView.PreferBelow | PopupView.IgnoreFit
 
     NavigationPanel {
         id: navPanel
@@ -85,6 +86,8 @@ StyledPopupView {
             text: qsTrc("playback", "Highlight notes and click to edit")
             checked: root.emphasisModel.emphasisMode
             enabled: root.emphasisModel.hasScore
+            toolTipTitle: qsTrc("playback", "Highlight notes and click to edit")
+            toolTipDescription: qsTrc("playback", "Color the edited part red. Click a note to add or remove it on that part only.")
             navigation.panel: navPanel
             navigation.order: 2
             onClicked: root.emphasisModel.emphasisMode = !checked
@@ -107,6 +110,8 @@ StyledPopupView {
                 decimals: 0
                 measureUnitsSymbol: qsTrc("playback", "dB")
                 enabled: root.emphasisModel.hasScore
+                toolTipTitle: qsTrc("playback", "Emphasized")
+                toolTipDescription: qsTrc("playback", "Gain in decibels for notes that belong to a checked part.")
                 navigation.panel: navPanel
                 navigation.order: 3
                 onValueEdited: function(newValue) {
@@ -127,6 +132,8 @@ StyledPopupView {
                 decimals: 0
                 measureUnitsSymbol: qsTrc("playback", "dB")
                 enabled: root.emphasisModel.hasScore
+                toolTipTitle: qsTrc("playback", "Others")
+                toolTipDescription: qsTrc("playback", "Gain in decibels for notes that do not belong to any checked part.")
                 navigation.panel: navPanel
                 navigation.order: 4
                 onValueEdited: function(newValue) {
@@ -186,6 +193,8 @@ StyledPopupView {
                 Layout.fillWidth: true
                 text: qsTrc("playback", "Selection")
                 enabled: root.emphasisModel.hasScore
+                toolTipTitle: qsTrc("playback", "Selection")
+                toolTipDescription: qsTrc("playback", "Set the measure range from the current score selection.")
                 navigation.panel: navPanel
                 navigation.order: 7
                 onClicked: root.emphasisModel.useSelectionRange()
@@ -195,6 +204,8 @@ StyledPopupView {
                 Layout.fillWidth: true
                 text: qsTrc("playback", "All")
                 enabled: root.emphasisModel.hasScore
+                toolTipTitle: qsTrc("playback", "All")
+                toolTipDescription: qsTrc("playback", "Clear the measure range so emphasis uses the whole score.")
                 navigation.panel: navPanel
                 navigation.order: 8
                 onClicked: {
@@ -224,6 +235,8 @@ StyledPopupView {
                     text: modelData.label
                     checked: modelData.selected
                     enabled: modelData.available
+                    toolTipTitle: modelData.label
+                    toolTipDescription: modelData.tooltip
                     onClicked: root.emphasisModel.setPartSelected(modelData.id, !checked)
                 }
             }
@@ -249,6 +262,8 @@ StyledPopupView {
                     var index = indexOfValue(root.emphasisModel.editingPartId)
                     return index >= 0 ? index : 0
                 }
+                toolTipTitle: qsTrc("playback", "Editing")
+                toolTipDescription: qsTrc("playback", "Clicks in highlight mode add or remove notes on this part only.")
                 navigation.panel: navPanel
                 navigation.order: 9
                 navigation.name: "EditingPartDropdown"
@@ -260,6 +275,8 @@ StyledPopupView {
             FlatButton {
                 text: qsTrc("playback", "New")
                 enabled: root.emphasisModel.hasScore
+                toolTipTitle: qsTrc("playback", "New")
+                toolTipDescription: qsTrc("playback", "Create a custom part. Its parent starts as the part you were editing.")
                 navigation.panel: navPanel
                 navigation.order: 10
                 onClicked: root.emphasisModel.addCustomPart()
@@ -268,61 +285,81 @@ StyledPopupView {
             FlatButton {
                 text: qsTrc("playback", "Delete")
                 enabled: root.emphasisModel.canDeleteEditingPart
+                toolTipTitle: qsTrc("playback", "Delete")
+                toolTipDescription: qsTrc("playback", "Delete this custom part. Built-in SATB parts cannot be deleted.")
                 navigation.panel: navPanel
                 navigation.order: 11
                 onClicked: root.emphasisModel.deleteEditingPart()
             }
         }
 
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
+        Repeater {
+            model: (root.emphasisModel.hasScore && !root.emphasisModel.editingPartBuiltin)
+                   ? [root.emphasisModel.editingPartId] : []
 
-            StyledTextLabel {
-                text: qsTrc("playback", "Name")
-            }
+            delegate: ColumnLayout {
+                id: customPartEditors
 
-            TextInputField {
+                required property string modelData
+
                 Layout.fillWidth: true
-                enabled: root.emphasisModel.hasScore && !root.emphasisModel.editingPartBuiltin
-                currentText: root.emphasisModel.editingPartName
-                navigation.panel: navPanel
-                navigation.order: 12
-                onTextChanged: function(newTextValue) {
-                    root.emphasisModel.editingPartName = newTextValue
+                spacing: 8
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    StyledTextLabel {
+                        text: qsTrc("playback", "Name")
+                    }
+
+                    TextInputField {
+                        Layout.fillWidth: true
+                        currentText: root.emphasisModel.editingPartName
+                        navigation.panel: navPanel
+                        navigation.order: 12
+                        onTextEditingFinished: function(newTextValue) {
+                            root.emphasisModel.applyEditingPartName(customPartEditors.modelData, newTextValue)
+                        }
+                    }
                 }
-            }
-        }
 
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
 
-            StyledTextLabel {
-                text: qsTrc("playback", "Parent")
-            }
+                    StyledTextLabel {
+                        text: qsTrc("playback", "Parent")
+                    }
 
-            StyledDropdown {
-                Layout.fillWidth: true
-                enabled: root.emphasisModel.hasScore && !root.emphasisModel.editingPartBuiltin
-                model: root.emphasisModel.parentOptions
-                currentIndex: {
-                    var index = indexOfValue(root.emphasisModel.editingPartParentId)
-                    return index >= 0 ? index : 0
-                }
-                navigation.panel: navPanel
-                navigation.order: 13
-                navigation.name: "ParentPartDropdown"
-                onActivated: function(index, value) {
-                    root.emphasisModel.editingPartParentId = value
+                    StyledDropdown {
+                        Layout.fillWidth: true
+                        model: root.emphasisModel.parentOptions
+                        currentIndex: {
+                            var index = indexOfValue(root.emphasisModel.editingPartParentId)
+                            return index >= 0 ? index : 0
+                        }
+                        toolTipTitle: qsTrc("playback", "Parent")
+                        toolTipDescription: qsTrc("playback", "Notes this part inherits before its own added and removed clicks.")
+                        navigation.panel: navPanel
+                        navigation.order: 13
+                        navigation.name: "ParentPartDropdown"
+                        onActivated: function(index, value) {
+                            root.emphasisModel.applyEditingPartParentId(customPartEditors.modelData, value)
+                        }
+                    }
                 }
             }
         }
 
         FlatButton {
+            id: resetButton
             Layout.fillWidth: true
+            Layout.minimumWidth: implicitWidth
             text: qsTrc("playback", "Reset this part’s edits")
             enabled: root.emphasisModel.hasScore
+            toolTipTitle: qsTrc("playback", "Reset this part’s edits")
+            toolTipDescription: qsTrc("playback", "Remove only this part’s added and removed clicks. Notes from the rule or parent come back.")
             navigation.panel: navPanel
             navigation.order: 14
             onClicked: root.emphasisModel.resetEditingPartEdits()
