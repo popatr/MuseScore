@@ -41,6 +41,20 @@ Item {
     readonly property int partNavStart: root.navigationOrderStart + 8
     readonly property int editingNavStart: root.partNavStart + Math.max(root.partCount, 1)
 
+    function showCheckBoxTooltip(item, title, description) {
+        if (item.hovered) {
+            ui.tooltip.show(item, title, description)
+        } else {
+            ui.tooltip.hide(item)
+        }
+    }
+
+    function hideCheckBoxTooltipOnPress(item) {
+        if (item.pressed) {
+            ui.tooltip.hide(item, true)
+        }
+    }
+
     implicitWidth: 560
     implicitHeight: contentColumn.implicitHeight
 
@@ -86,10 +100,12 @@ Item {
             text: qsTrc("playback", "Highlight notes and click to edit")
             checked: root.emphasisModel.emphasisMode
             enabled: root.emphasisModel.hasScore
-            toolTipTitle: qsTrc("playback", "Highlight notes and click to edit")
-            toolTipDescription: qsTrc("playback", "Color added notes maroon and the rest of the edited part red. Click a note to add or remove it on that part only.")
             navigation.panel: root.navigationPanel
             navigation.order: root.navigationOrderStart + 1
+            navigation.accessible.description: qsTrc("playback", "Color added notes maroon and the rest of the edited part red. Click a note to add or remove it on that part only.")
+            onHoveredChanged: root.showCheckBoxTooltip(this, qsTrc("playback", "Highlight notes and click to edit"),
+                                                       navigation.accessible.description)
+            onPressedChanged: root.hideCheckBoxTooltipOnPress(this)
             onClicked: root.emphasisModel.emphasisMode = !checked
         }
 
@@ -112,10 +128,9 @@ Item {
                 decimals: 0
                 measureUnitsSymbol: qsTrc("playback", "dB")
                 enabled: root.emphasisModel.hasScore
-                toolTipTitle: qsTrc("playback", "Emphasized")
-                toolTipDescription: qsTrc("playback", "Gain in decibels for notes that belong to a checked part.")
                 navigation.panel: root.navigationPanel
                 navigation.order: root.navigationOrderStart + 2
+                navigation.accessible.description: qsTrc("playback", "Gain in decibels for notes that belong to a checked part.")
                 onValueEdited: function(newValue) {
                     root.emphasisModel.emphasizedDb = newValue
                 }
@@ -134,10 +149,9 @@ Item {
                 decimals: 0
                 measureUnitsSymbol: qsTrc("playback", "dB")
                 enabled: root.emphasisModel.hasScore
-                toolTipTitle: qsTrc("playback", "Others")
-                toolTipDescription: qsTrc("playback", "Gain in decibels for notes that do not belong to any checked part.")
                 navigation.panel: root.navigationPanel
                 navigation.order: root.navigationOrderStart + 3
+                navigation.accessible.description: qsTrc("playback", "Gain in decibels for notes that do not belong to any checked part.")
                 onValueEdited: function(newValue) {
                     root.emphasisModel.otherDb = newValue
                 }
@@ -238,10 +252,11 @@ Item {
                     text: modelData.label
                     checked: modelData.selected
                     enabled: modelData.available
-                    toolTipTitle: modelData.label
-                    toolTipDescription: modelData.tooltip
                     navigation.panel: root.navigationPanel
                     navigation.order: root.partNavStart + index
+                    navigation.accessible.description: modelData.tooltip
+                    onHoveredChanged: root.showCheckBoxTooltip(this, modelData.label, modelData.tooltip)
+                    onPressedChanged: root.hideCheckBoxTooltipOnPress(this)
                     onClicked: root.emphasisModel.setPartSelected(modelData.id, !checked)
                 }
             }
@@ -298,11 +313,10 @@ Item {
                     var index = indexOfValue(root.emphasisModel.editingPartId)
                     return index >= 0 ? index : 0
                 }
-                toolTipTitle: qsTrc("playback", "Editing")
-                toolTipDescription: qsTrc("playback", "Clicks in highlight mode add or remove notes on this part only.")
                 navigation.panel: root.navigationPanel
                 navigation.order: root.editingNavStart + 2
                 navigation.name: "EditingPartDropdown"
+                navigation.accessible.description: qsTrc("playback", "Clicks in highlight mode add or remove notes on this part only.")
                 onActivated: function(index, value) {
                     root.emphasisModel.editingPartId = value
                 }
@@ -335,10 +349,12 @@ Item {
             text: qsTrc("playback", "Solo")
             checked: root.emphasisModel.solo
             enabled: root.emphasisModel.hasScore
-            toolTipTitle: qsTrc("playback", "Solo")
-            toolTipDescription: qsTrc("playback", "Playback and export use only the part being edited. Checked parts stay as they are.")
             navigation.panel: root.navigationPanel
             navigation.order: root.editingNavStart + 5
+            navigation.accessible.description: qsTrc("playback", "Playback and export use only the part being edited. Checked parts stay as they are.")
+            onHoveredChanged: root.showCheckBoxTooltip(this, qsTrc("playback", "Solo"),
+                                                       navigation.accessible.description)
+            onPressedChanged: root.hideCheckBoxTooltipOnPress(this)
             onClicked: root.emphasisModel.solo = !checked
         }
 
@@ -388,11 +404,10 @@ Item {
                             var index = indexOfValue(root.emphasisModel.editingPartParentId)
                             return index >= 0 ? index : 0
                         }
-                        toolTipTitle: qsTrc("playback", "Parent")
-                        toolTipDescription: qsTrc("playback", "Notes this part inherits before its own added and removed clicks.")
                         navigation.panel: root.navigationPanel
                         navigation.order: root.editingNavStart + 7
                         navigation.name: "ParentPartDropdown"
+                        navigation.accessible.description: qsTrc("playback", "Notes this part inherits before its own added and removed clicks.")
                         onActivated: function(index, value) {
                             root.emphasisModel.applyEditingPartParentId(customPartEditors.modelData, value)
                         }
@@ -420,11 +435,10 @@ Item {
                     var index = indexOfValue(root.emphasisModel.copySourceId)
                     return index >= 0 ? index : 0
                 }
-                toolTipTitle: qsTrc("playback", "Copy from")
-                toolTipDescription: qsTrc("playback", "Choose the part whose current notes will be copied onto this custom part.")
                 navigation.panel: root.navigationPanel
                 navigation.order: root.editingNavStart + 8
                 navigation.name: "CopySourceDropdown"
+                navigation.accessible.description: qsTrc("playback", "Choose the part whose current notes will be copied onto this custom part.")
                 onActivated: function(index, value) {
                     root.emphasisModel.copySourceId = value
                 }
