@@ -47,6 +47,7 @@ class PracticeEmphasisData
 public:
     static constexpr float DEFAULT_EMPHASIZED_DB = 9.f;
     static constexpr float DEFAULT_OTHER_DB = -15.f;
+    static constexpr float SOLO_MUTE_DB = -60.f;
     static constexpr int CURRENT_VERSION = 3;
 
     enum class Role {
@@ -133,6 +134,7 @@ public:
     bool isEmphasized(const Note* note) const;
     Highlight noteHighlight(const Note* note) const;
     bool playbackEngaged() const;
+    float otherGainDb() const;
     void editNote(Note* note);
 
     //! Staff/voice pairs that contain at least one emphasized note.

@@ -481,7 +481,7 @@ Item {
                 enabled: root.emphasisModel.hasScore
                 navigation.panel: root.navigationPanel
                 navigation.order: root.navigationOrderStart + 2
-                navigation.accessible.description: qsTrc("playback", "Playback and export use only the part being edited. Checked parts stay as they are.")
+                navigation.accessible.description: qsTrc("playback", "Playback and export use only the part being edited. Other notes are muted. Checked parts stay as they are.")
                 onHoveredChanged: root.showCheckBoxTooltip(this, qsTrc("playback", "Solo"),
                                                            navigation.accessible.description)
                 onPressedChanged: root.hideCheckBoxTooltipOnPress(this)

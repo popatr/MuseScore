@@ -288,7 +288,7 @@ void PracticeEmphasis::applyToNote(const Note* note, NominalNoteCtx& ctx)
     }
 
     const bool emphasized = data.isEmphasized(note);
-    const float gain = emphasized ? data.document().emphasizedDb : data.document().otherDb;
+    const float gain = emphasized ? data.document().emphasizedDb : data.otherGainDb();
     ctx.dynamicLevel = scaleDynamicLevel(ctx.dynamicLevel, gain);
     if (emphasized) {
         ctx.staffIdx = static_cast<staff_idx_t>(ctx.staffIdx + EMPHASIS_STAFF_OFFSET);
@@ -330,7 +330,7 @@ void PracticeEmphasis::applyToDynamics(const Score* score, DynamicAutomationLaye
             if (static_cast<int>(it->first / MAX_VOICES) >= EMPHASIS_STAFF_OFFSET) {
                 continue;
             }
-            scaleCurve(it->second, data.document().otherDb);
+            scaleCurve(it->second, data.otherGainDb());
         }
         for (auto& companion : companions) {
             layers[companion.first] = std::move(companion.second);

@@ -536,8 +536,11 @@ void PracticeEmphasisPanelModel::setSolo(bool enabled)
     if (!emphasis || !master) {
         return;
     }
-    if (enabled && emphasis->document().editingPartId.empty()) {
-        emphasis->setEditingPartId(master, "S1");
+    if (enabled) {
+        emphasis->setPlaybackActive(true);
+        if (emphasis->document().editingPartId.empty()) {
+            emphasis->setEditingPartId(master, "S1");
+        }
     }
     emphasis->setSolo(enabled);
 }

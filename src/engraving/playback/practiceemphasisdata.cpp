@@ -944,11 +944,11 @@ PracticeEmphasisData::Highlight PracticeEmphasisData::noteHighlight(const Note* 
 
 bool PracticeEmphasisData::playbackEngaged() const
 {
-    if (!m_document.playbackActive) {
-        return false;
-    }
     if (m_document.solo) {
         return !m_document.editingPartId.empty();
+    }
+    if (!m_document.playbackActive) {
+        return false;
     }
     for (const PartRule& part : m_document.parts) {
         if (part.selected) {
@@ -956,6 +956,11 @@ bool PracticeEmphasisData::playbackEngaged() const
         }
     }
     return false;
+}
+
+float PracticeEmphasisData::otherGainDb() const
+{
+    return m_document.solo ? SOLO_MUTE_DB : m_document.otherDb;
 }
 
 std::string PracticeEmphasisData::choosePartForStaff(const Score* score, int staffIndex, const std::string& currentId) const

@@ -1059,6 +1059,70 @@ TEST_F(Engraving_PracticeEmphasisTests, SoloUsesOnlyEditingPartWithoutChangingCh
     delete score;
 }
 
+TEST_F(Engraving_PracticeEmphasisTests, SoloMutesNonEditingNotesDuringPlayback)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+    score->initAutomation();
+
+    Note* e5 = findPitch(score, 76);
+    Note* alto = findPitch(score, 67);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(alto);
+
+    PlaybackData writtenWomen = loadPart(score, 0);
+    const std::vector<HeardNote> written = heardNotes(writtenWomen);
+    const dynamic_level_t writtenSoprano = findMidi(written, 76)->level;
+    const dynamic_level_t writtenAlto = findMidi(written, 67)->level;
+    const dynamic_level_t loud = PracticeEmphasis::scaleDynamicLevel(writtenSoprano,
+                                                                     PracticeEmphasisData::DEFAULT_EMPHASIZED_DB);
+    const dynamic_level_t quiet = PracticeEmphasis::scaleDynamicLevel(writtenAlto,
+                                                                      PracticeEmphasisData::DEFAULT_OTHER_DB);
+    const dynamic_level_t muted = PracticeEmphasis::scaleDynamicLevel(writtenAlto,
+                                                                      PracticeEmphasisData::SOLO_MUTE_DB);
+    const staff_layer_idx_t sopranoCompanion = PracticeEmphasis::EMPHASIS_STAFF_OFFSET;
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setPartSelected(score, "A1", true);
+    emphasis.setEditingPartId(score, "S1");
+    EXPECT_FALSE(emphasis.document().playbackActive);
+    EXPECT_FALSE(emphasis.playbackEngaged());
+
+    {
+        const std::vector<HeardNote> women = heardNotes(loadPart(score, 0));
+        expectHeard(women, 76, 0, 0, writtenSoprano);
+        expectHeard(women, 67, 0, 1, writtenAlto);
+    }
+
+    emphasis.setSolo(true);
+    EXPECT_TRUE(emphasis.playbackEngaged());
+    EXPECT_TRUE(emphasis.isEmphasized(e5));
+    EXPECT_FALSE(emphasis.isEmphasized(alto));
+    EXPECT_EQ(emphasis.otherGainDb(), PracticeEmphasisData::SOLO_MUTE_DB);
+    EXPECT_LT(muted, quiet);
+
+    {
+        const std::vector<HeardNote> women = heardNotes(loadPart(score, 0));
+        expectHeard(women, 76, sopranoCompanion, 0, loud);
+        expectHeard(women, 67, 0, 1, muted);
+    }
+
+    emphasis.setPlaybackActive(true);
+    emphasis.setSolo(false);
+    EXPECT_TRUE(emphasis.playbackEngaged());
+    EXPECT_EQ(emphasis.otherGainDb(), PracticeEmphasisData::DEFAULT_OTHER_DB);
+
+    {
+        const std::vector<HeardNote> women = heardNotes(loadPart(score, 0));
+        expectHeard(women, 76, sopranoCompanion, 0, loud);
+        expectHeard(women, 67, 0, 1, quiet);
+    }
+
+    delete score;
+}
+
 TEST_F(Engraving_PracticeEmphasisTests, AddedNotesHighlightAsEditedAdded)
 {
     ScoreEmphasisGuard environment;
