@@ -25,6 +25,7 @@
 
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/note.h"
+#include "engraving/dom/page.h"
 #include "engraving/dom/score.h"
 #include "engraving/playback/practiceemphasisdata.h"
 
@@ -37,6 +38,52 @@ using namespace mu;
 using namespace mu::notation;
 using namespace mu::engraving;
 using namespace muse::draw;
+
+namespace {
+const Color kEditedNoteColor(224, 32, 48);
+const Color kOtherLoudNoteColor(200, 128, 64);
+
+Color editedAddedHighlightColor(bool invertColors)
+{
+    // Pale highlighter behind manually added notes. Dark (inverted) paper needs a
+    // slightly stronger tint so the mark stays visible without covering the note.
+    return invertColors ? Color(255, 110, 130, 120)
+           : Color(255, 96, 112, 78);
+}
+
+void paintEditedNoteHighlights(Painter* painter, const Page* page, bool invertColors)
+{
+    if (!painter || !page) {
+        return;
+    }
+    const Score* score = page->score();
+    const MasterScore* master = score ? score->masterScore() : nullptr;
+    if (!master || !master->practiceEmphasis().document().emphasisMode) {
+        return;
+    }
+
+    const PracticeEmphasisData& emphasis = master->practiceEmphasis();
+    painter->save();
+    painter->setNoPen();
+    painter->setBrush(Brush(editedAddedHighlightColor(invertColors)));
+
+    for (EngravingItem* item : page->elements()) {
+        if (!item || !item->isNote() || item->ldata()->isSkipDraw()) {
+            continue;
+        }
+        const Note* note = toNote(item);
+        if (emphasis.noteHighlight(note) != PracticeEmphasisData::Highlight::EditedAdded) {
+            continue;
+        }
+        const double pad = 0.5 * note->spatium();
+        const double radius = 0.45 * note->spatium();
+        const RectF halo = note->pageBoundingRect().adjusted(-pad, -pad, pad, pad);
+        painter->drawRoundedRect(halo, radius, radius);
+    }
+
+    painter->restore();
+}
+}
 
 NotationPainting::NotationPainting(Notation* notation)
     : muse::Contextable(notation->iocContext())
@@ -123,8 +170,12 @@ void NotationPainting::doPaint(Painter* painter, const Options& opt)
 
     Options myopt = opt;
     bool printPageBackground = myopt.printPageBackground;
-    myopt.onPaintPageSheet = [this, printPageBackground](Painter* painter, const Page* page, const RectF& pageRect) {
+    auto extraPagePaint = myopt.onPaintPageSheet;
+    myopt.onPaintPageSheet = [this, printPageBackground, extraPagePaint](Painter* painter, const Page* page, const RectF& pageRect) {
         paintPageSheet(painter, page, pageRect, printPageBackground);
+        if (extraPagePaint) {
+            extraPagePaint(painter, page, pageRect);
+        }
     };
 
     scoreRenderer()->paintScore(painter, score(), myopt);
@@ -217,15 +268,23 @@ void NotationPainting::paintView(Painter* painter, const RectF& frameRect, bool 
                 return defaultColor;
             }
             switch (master->practiceEmphasis().noteHighlight(note)) {
+            case PracticeEmphasisData::Highlight::EditedAdded:
             case PracticeEmphasisData::Highlight::Edited:
-                return Color(224, 32, 48);
+                return kEditedNoteColor;
             case PracticeEmphasisData::Highlight::OtherLoud:
-                return Color(200, 128, 64);
+                return kOtherLoudNoteColor;
             case PracticeEmphasisData::Highlight::None:
                 break;
             }
             return defaultColor;
         };
+
+        if (!isPrinting) {
+            const bool invertColors = opt.invertColors;
+            opt.onPaintPageSheet = [invertColors](Painter* painter, const Page* page, const RectF&) {
+                paintEditedNoteHighlights(painter, page, invertColors);
+            };
+        }
     }
 
     doPaint(painter, opt);

@@ -27,6 +27,8 @@
 
 #include "translation.h"
 
+#include "rcommand/commandtypes.h"
+
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/measurebase.h"
@@ -130,26 +132,6 @@ QString partCheckboxTooltip(const PracticeEmphasisData::PartRule& part)
     }
     return dropdownLabel(part);
 }
-
-bool isDescendantOf(const std::vector<PracticeEmphasisData::PartRule>& parts, const std::string& candidateId, const std::string& ancestorId)
-{
-    if (candidateId.empty() || ancestorId.empty() || candidateId == ancestorId) {
-        return false;
-    }
-    std::unordered_set<std::string> seen;
-    std::string current = candidateId;
-    while (!current.empty() && seen.insert(current).second) {
-        const PracticeEmphasisData::PartRule* part = findVisible(parts, current);
-        if (!part) {
-            break;
-        }
-        if (part->parentId == ancestorId) {
-            return true;
-        }
-        current = part->parentId;
-    }
-    return false;
-}
 }
 
 PracticeEmphasisPanelModel::PracticeEmphasisPanelModel(QObject* parent)
@@ -203,11 +185,19 @@ void PracticeEmphasisPanelModel::connectScore()
             refresh();
         }, muse::async::Asyncable::Mode::SetReplace);
     }
+
+    if (!globalContext() || !globalContext()->currentNotation() || !globalContext()->currentNotation()->interaction()) {
+        return;
+    }
+    globalContext()->currentNotation()->interaction()->selectionChanged().onNotify(this, [this]() {
+        refresh();
+    }, muse::async::Asyncable::Mode::SetReplace);
 }
 
 void PracticeEmphasisPanelModel::refresh()
 {
     emit stateChanged();
+    emit editingPartChanged();
 }
 
 bool PracticeEmphasisPanelModel::hasScore() const
@@ -295,6 +285,14 @@ QString PracticeEmphasisPanelModel::editingPartName() const
     if (id.empty()) {
         return {};
     }
+    const PracticeEmphasisData* emphasis = data();
+    if (emphasis) {
+        for (const PracticeEmphasisData::PartRule& part : emphasis->document().parts) {
+            if (part.id == id) {
+                return QString::fromStdString(part.name);
+            }
+        }
+    }
     if (const PracticeEmphasisData::PartRule* part = findVisible(visibleParts(currentMaster()), id)) {
         return QString::fromStdString(part->name);
     }
@@ -319,10 +317,72 @@ QString PracticeEmphasisPanelModel::editingPartParentId() const
     if (id.empty()) {
         return {};
     }
+    const PracticeEmphasisData* emphasis = data();
+    if (emphasis) {
+        for (const PracticeEmphasisData::PartRule& part : emphasis->document().parts) {
+            if (part.id == id) {
+                return QString::fromStdString(part.parentId);
+            }
+        }
+    }
     if (const PracticeEmphasisData::PartRule* part = findVisible(visibleParts(currentMaster()), id)) {
         return QString::fromStdString(part->parentId);
     }
     return {};
+}
+
+int PracticeEmphasisPanelModel::indexOfOptionValue(const QVariantList& options, const QString& value) const
+{
+    for (int i = 0; i < options.size(); ++i) {
+        const QVariantMap item = options.at(i).toMap();
+        if (item.value(QStringLiteral("value")).toString() == value) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+QString PracticeEmphasisPanelModel::editingValueAt(int index) const
+{
+    const QVariantList options = editingPartOptions();
+    if (index < 0 || index >= options.size()) {
+        return {};
+    }
+    return options.at(index).toMap().value(QStringLiteral("value")).toString();
+}
+
+QString PracticeEmphasisPanelModel::parentValueAt(int index) const
+{
+    const PracticeEmphasisData* emphasis = data();
+    if (!emphasis || index < 0) {
+        return {};
+    }
+    const std::vector<std::string> ids = emphasis->parentOptionIds(currentMaster(), editingPartId().toStdString());
+    if (static_cast<size_t>(index) >= ids.size()) {
+        return {};
+    }
+    return QString::fromStdString(ids.at(static_cast<size_t>(index)));
+}
+
+int PracticeEmphasisPanelModel::editingPartIndex() const
+{
+    return indexOfOptionValue(editingPartOptions(), editingPartId());
+}
+
+int PracticeEmphasisPanelModel::editingPartParentIndex() const
+{
+    const PracticeEmphasisData* emphasis = data();
+    if (!emphasis) {
+        return 0;
+    }
+    return emphasis->parentOptionIndex(currentMaster(), editingPartId().toStdString(),
+                                       editingPartParentId().toStdString());
+}
+
+bool PracticeEmphasisPanelModel::solo() const
+{
+    const PracticeEmphasisData* emphasis = data();
+    return emphasis && emphasis->document().solo;
 }
 
 QVariantList PracticeEmphasisPanelModel::parentOptions() const
@@ -333,15 +393,21 @@ QVariantList PracticeEmphasisPanelModel::parentOptions() const
     none.insert(QStringLiteral("value"), QString());
     list.push_back(none);
 
+    const PracticeEmphasisData* emphasis = data();
+    if (!emphasis) {
+        return list;
+    }
+
     const std::string editingId = editingPartId().toStdString();
     const std::vector<PracticeEmphasisData::PartRule> parts = visibleParts(currentMaster());
-    for (const PracticeEmphasisData::PartRule& part : parts) {
-        if (part.id == editingId || isDescendantOf(parts, part.id, editingId)) {
+    for (const std::string& id : emphasis->parentOptionIds(currentMaster(), editingId)) {
+        if (id.empty()) {
             continue;
         }
+        const PracticeEmphasisData::PartRule* part = findVisible(parts, id);
         QVariantMap item;
-        item.insert(QStringLiteral("text"), dropdownLabel(part));
-        item.insert(QStringLiteral("value"), QString::fromStdString(part.id));
+        item.insert(QStringLiteral("text"), part ? dropdownLabel(*part) : QString::fromStdString(id));
+        item.insert(QStringLiteral("value"), QString::fromStdString(id));
         list.push_back(item);
     }
     return list;
@@ -355,6 +421,29 @@ bool PracticeEmphasisPanelModel::canDeleteEditingPart() const
 bool PracticeEmphasisPanelModel::debugOverrideActive() const
 {
     return PracticeEmphasis::debugOverrideActive();
+}
+
+QString PracticeEmphasisPanelModel::selectionButtonText() const
+{
+    if (!globalContext() || !globalContext()->currentNotation() || !globalContext()->currentNotation()->interaction()) {
+        return muse::qtrc("playback", "From Selection");
+    }
+    const INotationSelectionPtr selection = globalContext()->currentNotation()->interaction()->selection();
+    if (!selection) {
+        return muse::qtrc("playback", "From Selection");
+    }
+    const int from = displayedMeasureNumber(selection->startMeasureBase());
+    int to = displayedMeasureNumber(selection->endMeasureBase());
+    if (from <= 0) {
+        return muse::qtrc("playback", "From Selection");
+    }
+    if (to <= 0) {
+        to = from;
+    }
+    if (from == to) {
+        return muse::qtrc("playback", "From Selection (%1)").arg(from);
+    }
+    return muse::qtrc("playback", "From Selection (%1–%2)").arg(from).arg(to);
 }
 
 void PracticeEmphasisPanelModel::setPlaybackActive(bool active)
@@ -437,6 +526,139 @@ void PracticeEmphasisPanelModel::setEditingPartId(const QString& partId)
         return;
     }
     master->practiceEmphasis().setEditingPartId(master, partId.toStdString());
+    m_copySourceId = editingPartParentId();
+}
+
+void PracticeEmphasisPanelModel::setSolo(bool enabled)
+{
+    PracticeEmphasisData* emphasis = data();
+    MasterScore* master = currentMaster();
+    if (!emphasis || !master) {
+        return;
+    }
+    if (enabled) {
+        emphasis->setPlaybackActive(true);
+        if (emphasis->document().editingPartId.empty()) {
+            emphasis->setEditingPartId(master, "S1");
+        }
+    }
+    emphasis->setSolo(enabled);
+}
+
+void PracticeEmphasisPanelModel::togglePanel()
+{
+    if (!commandDispatcher()) {
+        return;
+    }
+    commandDispatcher()->dispatch(muse::rcommand::Command("command://app/dock/toggle-practice-emphasis"));
+}
+
+bool PracticeEmphasisPanelModel::canUndo() const
+{
+    const PracticeEmphasisData* emphasis = data();
+    return emphasis && emphasis->canUndo();
+}
+
+bool PracticeEmphasisPanelModel::canRedo() const
+{
+    const PracticeEmphasisData* emphasis = data();
+    return emphasis && emphasis->canRedo();
+}
+
+void PracticeEmphasisPanelModel::undo()
+{
+    if (PracticeEmphasisData* emphasis = data()) {
+        emphasis->undo();
+    }
+}
+
+void PracticeEmphasisPanelModel::redo()
+{
+    if (PracticeEmphasisData* emphasis = data()) {
+        emphasis->redo();
+    }
+}
+
+QString PracticeEmphasisPanelModel::copySourceId() const
+{
+    return resolvedCopySourceId();
+}
+
+int PracticeEmphasisPanelModel::copySourceIndex() const
+{
+    return indexOfOptionValue(copySourceOptions(), resolvedCopySourceId());
+}
+
+void PracticeEmphasisPanelModel::setCopySourceId(const QString& sourceId)
+{
+    if (m_copySourceId == sourceId) {
+        return;
+    }
+    m_copySourceId = sourceId;
+    emit stateChanged();
+}
+
+QString PracticeEmphasisPanelModel::resolvedCopySourceId() const
+{
+    const QString editingId = editingPartId();
+    const std::vector<PracticeEmphasisData::PartRule> parts = visibleParts(currentMaster());
+    auto exists = [&](const QString& id) {
+        if (id.isEmpty() || id == editingId) {
+            return false;
+        }
+        for (const PracticeEmphasisData::PartRule& part : parts) {
+            if (part.id == id.toStdString()) {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (exists(m_copySourceId)) {
+        return m_copySourceId;
+    }
+    const QString parentId = editingPartParentId();
+    if (exists(parentId)) {
+        return parentId;
+    }
+    for (const PracticeEmphasisData::PartRule& part : parts) {
+        const QString id = QString::fromStdString(part.id);
+        if (id != editingId) {
+            return id;
+        }
+    }
+    return {};
+}
+
+QVariantList PracticeEmphasisPanelModel::copySourceOptions() const
+{
+    QVariantList list;
+    const std::string editingId = editingPartId().toStdString();
+    for (const PracticeEmphasisData::PartRule& part : visibleParts(currentMaster())) {
+        if (part.id == editingId) {
+            continue;
+        }
+        QVariantMap item;
+        item.insert(QStringLiteral("text"), dropdownLabel(part));
+        item.insert(QStringLiteral("value"), QString::fromStdString(part.id));
+        list.push_back(item);
+    }
+    return list;
+}
+
+bool PracticeEmphasisPanelModel::canCopyFromPart() const
+{
+    return hasScore() && !editingPartBuiltin() && !resolvedCopySourceId().isEmpty();
+}
+
+void PracticeEmphasisPanelModel::copyFromPart()
+{
+    MasterScore* master = currentMaster();
+    PracticeEmphasisData* emphasis = data();
+    const QString sourceId = resolvedCopySourceId();
+    if (!master || !emphasis || editingPartBuiltin() || sourceId.isEmpty()) {
+        return;
+    }
+    emphasis->copyFromPart(master, editingPartId().toStdString(), sourceId.toStdString());
 }
 
 void PracticeEmphasisPanelModel::applyEditingPartName(const QString& partId, const QString& name)
@@ -478,6 +700,14 @@ void PracticeEmphasisPanelModel::useSelectionRange()
     PracticeEmphasisData* emphasis = data();
     if (emphasis) {
         emphasis->setRange(from, to);
+    }
+}
+
+void PracticeEmphasisPanelModel::clearMeasureRange()
+{
+    PracticeEmphasisData* emphasis = data();
+    if (emphasis) {
+        emphasis->setRange(0, 0);
     }
 }
 
