@@ -1230,14 +1230,14 @@ void NotationViewInputController::mouseReleaseEvent(QMouseEvent* event)
     }
 
     if (event->button() == Qt::LeftButton && event->modifiers() == Qt::NoModifier) {
-        // A press that turns into a drag keeps the written override. A click flips it.
+        // A press that turns into a drag keeps the part membership. A click toggles it.
         EngravingItem* clicked = hitElementContext().element;
         if (!readonly() && !interaction->isDragStarted() && !m_isCanvasDragged && clicked && clicked->isNote()
             && !noteInput->isNoteInputMode() && !playbackController()->isPlaying()) {
             Note* note = toNote(clicked);
             MasterScore* master = note->score() ? note->score()->masterScore() : nullptr;
             if (master && master->practiceEmphasis().document().emphasisMode) {
-                master->practiceEmphasis().toggleOverride(note);
+                master->practiceEmphasis().editNote(note);
             }
         }
         handleLeftClickRelease(event->pos());

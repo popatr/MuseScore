@@ -48,6 +48,13 @@ class PracticeEmphasisPanelModel : public QObject, public muse::Contextable, pub
     Q_PROPERTY(int fromMeasure READ fromMeasure WRITE setFromMeasure NOTIFY stateChanged)
     Q_PROPERTY(int toMeasure READ toMeasure WRITE setToMeasure NOTIFY stateChanged)
     Q_PROPERTY(QVariantList parts READ parts NOTIFY stateChanged)
+    Q_PROPERTY(QVariantList editingPartOptions READ editingPartOptions NOTIFY stateChanged)
+    Q_PROPERTY(QString editingPartId READ editingPartId WRITE setEditingPartId NOTIFY stateChanged)
+    Q_PROPERTY(QString editingPartName READ editingPartName NOTIFY stateChanged)
+    Q_PROPERTY(bool editingPartBuiltin READ editingPartBuiltin NOTIFY stateChanged)
+    Q_PROPERTY(QString editingPartParentId READ editingPartParentId NOTIFY stateChanged)
+    Q_PROPERTY(QVariantList parentOptions READ parentOptions NOTIFY stateChanged)
+    Q_PROPERTY(bool canDeleteEditingPart READ canDeleteEditingPart NOTIFY stateChanged)
     Q_PROPERTY(bool debugOverrideActive READ debugOverrideActive NOTIFY stateChanged)
 
     QML_ELEMENT
@@ -60,7 +67,11 @@ public:
     Q_INVOKABLE void load();
     Q_INVOKABLE void setPartSelected(const QString& partId, bool selected);
     Q_INVOKABLE void useSelectionRange();
-    Q_INVOKABLE void clearOverrides();
+    Q_INVOKABLE void addCustomPart();
+    Q_INVOKABLE void deleteEditingPart();
+    Q_INVOKABLE void resetEditingPartEdits();
+    Q_INVOKABLE void applyEditingPartName(const QString& partId, const QString& name);
+    Q_INVOKABLE void applyEditingPartParentId(const QString& partId, const QString& parentId);
 
     bool hasScore() const;
     bool playbackActive() const;
@@ -70,6 +81,13 @@ public:
     int fromMeasure() const;
     int toMeasure() const;
     QVariantList parts() const;
+    QVariantList editingPartOptions() const;
+    QString editingPartId() const;
+    QString editingPartName() const;
+    bool editingPartBuiltin() const;
+    QString editingPartParentId() const;
+    QVariantList parentOptions() const;
+    bool canDeleteEditingPart() const;
     bool debugOverrideActive() const;
 
     void setPlaybackActive(bool active);
@@ -78,6 +96,7 @@ public:
     void setOtherDb(int db);
     void setFromMeasure(int measure);
     void setToMeasure(int measure);
+    void setEditingPartId(const QString& partId);
 
 signals:
     void stateChanged();

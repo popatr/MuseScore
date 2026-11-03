@@ -26,8 +26,6 @@ set(PLAYBACK_SRC
     ${CMAKE_CURRENT_LIST_DIR}/playbackmodel.h
     ${CMAKE_CURRENT_LIST_DIR}/practiceemphasis.cpp
     ${CMAKE_CURRENT_LIST_DIR}/practiceemphasis.h
-    ${CMAKE_CURRENT_LIST_DIR}/practiceemphasisdata.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/practiceemphasisdata.h
     ${CMAKE_CURRENT_LIST_DIR}/playbackeventsrenderer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/playbackeventsrenderer.h
     ${CMAKE_CURRENT_LIST_DIR}/playbacksetupdataresolver.cpp

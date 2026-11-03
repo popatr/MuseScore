@@ -21,10 +21,11 @@
  */
 #pragma once
 
+#include <optional>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
-#include <unordered_map>
 
 #include "global/async/channel.h"
 #include "global/types/bytearray.h"
@@ -34,14 +35,19 @@ class Note;
 class Score;
 
 //! Practice-track emphasis stored beside the score, never in notation properties.
-//! A note is loud when any selected part claims it, unless a per-note override says otherwise.
-//! A single notehead is claimed by both parts of that voice (written unison). The top note of a
-//! chord belongs to the "1" part and every lower notehead belongs to the "2" part.
+//!
+//! Each part is a rule (builtin SATB, or an optional parent) plus its own added and
+//! removed notes. Membership is parent-or-rule notes, plus additions, minus removals.
+//! Checking a part only decides whether its members are loud. Loudness is the union of
+//! the checked parts. A single notehead is claimed by both builtin parts of that voice
+//! (written unison). The top note of a chord belongs to the "1" part and every lower
+//! notehead belongs to the "2" part.
 class PracticeEmphasisData
 {
 public:
     static constexpr float DEFAULT_EMPHASIZED_DB = 9.f;
     static constexpr float DEFAULT_OTHER_DB = -15.f;
+    static constexpr int CURRENT_VERSION = 2;
 
     enum class Role {
         Any,
@@ -49,9 +55,10 @@ public:
         Lower
     };
 
-    enum class Override {
-        ForceOn,
-        ForceOff
+    enum class Highlight {
+        None,
+        Edited,
+        OtherLoud
     };
 
     struct PartRule {
@@ -62,20 +69,24 @@ public:
         int voice = 0;
         Role role = Role::Top;
         bool selected = false;
+        bool builtin = false;
+        std::string parentId;
+        std::vector<std::string> added;
+        std::vector<std::string> removed;
 
         bool operator==(const PartRule& other) const;
     };
 
     struct Document {
-        int version = 1;
+        int version = CURRENT_VERSION;
         bool playbackActive = false;
         bool emphasisMode = false;
         float emphasizedDb = DEFAULT_EMPHASIZED_DB;
         float otherDb = DEFAULT_OTHER_DB;
         int fromMeasure = 0;
         int toMeasure = 0;
+        std::string editingPartId;
         std::vector<PartRule> parts;
-        std::unordered_map<std::string, Override> overrides;
 
         bool operator==(const Document& other) const;
     };
@@ -94,12 +105,19 @@ public:
     void setGains(float emphasizedDb, float otherDb);
     void setRange(int fromMeasure, int toMeasure);
     void setPartSelected(const Score* score, const std::string& id, bool selected);
-    void clearOverrides();
+    void setEditingPartId(const Score* score, const std::string& id);
+    void setPartName(const std::string& id, const std::string& name);
+    void setPartParent(const Score* score, const std::string& id, const std::string& parentId);
+    std::string addCustomPart(const Score* score, const std::string& name = {}, const std::string& parentId = {});
+    bool deletePart(const std::string& id);
+    void resetPartEdits(const std::string& id);
 
     bool partSelected(const std::string& id) const;
+    bool partContains(const Note* note, const std::string& partId) const;
     bool isEmphasized(const Note* note) const;
+    Highlight noteHighlight(const Note* note) const;
     bool playbackEngaged() const;
-    void toggleOverride(Note* note);
+    void editNote(Note* note);
 
     //! Staff/voice pairs that contain at least one emphasized note.
     std::vector<std::pair<int, int> > emphasizedVoices(const Score* score) const;
@@ -107,8 +125,22 @@ public:
     muse::async::Channel<> changed() const { return m_changed; }
 
 private:
-    bool claims(const Note* note, const PartRule& part) const;
+    const PartRule* findPart(const std::string& id) const;
+    PartRule* findPart(const std::string& id);
+    PartRule* ensurePart(const Score* score, const std::string& id);
+    std::vector<PartRule> visibleParts(const Score* score) const;
+    std::optional<PartRule> resolvePart(const Score* score, const std::string& id) const;
+
+    bool ruleMatches(const Note* note, const PartRule& part) const;
+    bool baseContains(const PartRule& part, const Note* note, std::unordered_set<std::string>& visiting) const;
+    bool partContains(const PartRule& part, const Note* note, std::unordered_set<std::string>& visiting) const;
     int resolvedStaffIndex(const Score* score, const PartRule& part) const;
+    int sourceStaffIndex(const Score* score, const PartRule& part) const;
+    int sourceStaffIndex(const Score* score, const PartRule& part, std::unordered_set<std::string>& visiting) const;
+    std::string choosePartForStaff(const Score* score, int staffIndex, const std::string& currentId) const;
+    bool wouldCreateCycle(const std::string& childId, const std::string& parentId) const;
+    void bindStaffEid(const Score* score, PartRule& part) const;
+    void toggleMembership(PartRule& part, Note* note);
     void notifyListeners();
 
     Document m_document;
