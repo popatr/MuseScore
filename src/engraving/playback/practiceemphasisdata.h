@@ -118,6 +118,12 @@ public:
     void resetPartEdits(const std::string& id);
     bool copyFromPart(const Score* score, const std::string& targetId, const std::string& sourceId);
 
+    //! Parent dropdown values: empty string first ("(none)"), then every visible part
+    //! that would not create a parent cycle. Index 0 is always none.
+    std::vector<std::string> parentOptionIds(const Score* score, const std::string& childId) const;
+    int parentOptionIndex(const Score* score, const std::string& childId,
+                          const std::string& parentId) const;
+
     bool canUndo() const;
     bool canRedo() const;
     void undo();
@@ -156,6 +162,8 @@ private:
     void toggleMembership(PartRule& part, Note* note);
     void resetHistory();
     void commitEdit(const Document& before, const std::string& coalesceKey = {});
+    void applyNonUndoableChange();
+    void projectNonUndoableFields(Document& snap) const;
     void notifyListeners();
 
     Document m_document;

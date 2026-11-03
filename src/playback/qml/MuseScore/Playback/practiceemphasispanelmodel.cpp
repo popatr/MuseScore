@@ -133,25 +133,6 @@ QString partCheckboxTooltip(const PracticeEmphasisData::PartRule& part)
     return dropdownLabel(part);
 }
 
-bool isDescendantOf(const std::vector<PracticeEmphasisData::PartRule>& parts, const std::string& candidateId, const std::string& ancestorId)
-{
-    if (candidateId.empty() || ancestorId.empty() || candidateId == ancestorId) {
-        return false;
-    }
-    std::unordered_set<std::string> seen;
-    std::string current = candidateId;
-    while (!current.empty() && seen.insert(current).second) {
-        const PracticeEmphasisData::PartRule* part = findVisible(parts, current);
-        if (!part) {
-            break;
-        }
-        if (part->parentId == ancestorId) {
-            return true;
-        }
-        current = part->parentId;
-    }
-    return false;
-}
 }
 
 PracticeEmphasisPanelModel::PracticeEmphasisPanelModel(QObject* parent)
@@ -217,6 +198,7 @@ void PracticeEmphasisPanelModel::connectScore()
 void PracticeEmphasisPanelModel::refresh()
 {
     emit stateChanged();
+    emit editingPartChanged();
 }
 
 bool PracticeEmphasisPanelModel::hasScore() const
@@ -304,6 +286,14 @@ QString PracticeEmphasisPanelModel::editingPartName() const
     if (id.empty()) {
         return {};
     }
+    const PracticeEmphasisData* emphasis = data();
+    if (emphasis) {
+        for (const PracticeEmphasisData::PartRule& part : emphasis->document().parts) {
+            if (part.id == id) {
+                return QString::fromStdString(part.name);
+            }
+        }
+    }
     if (const PracticeEmphasisData::PartRule* part = findVisible(visibleParts(currentMaster()), id)) {
         return QString::fromStdString(part->name);
     }
@@ -328,6 +318,14 @@ QString PracticeEmphasisPanelModel::editingPartParentId() const
     if (id.empty()) {
         return {};
     }
+    const PracticeEmphasisData* emphasis = data();
+    if (emphasis) {
+        for (const PracticeEmphasisData::PartRule& part : emphasis->document().parts) {
+            if (part.id == id) {
+                return QString::fromStdString(part.parentId);
+            }
+        }
+    }
     if (const PracticeEmphasisData::PartRule* part = findVisible(visibleParts(currentMaster()), id)) {
         return QString::fromStdString(part->parentId);
     }
@@ -345,9 +343,41 @@ int PracticeEmphasisPanelModel::indexOfOptionValue(const QVariantList& options, 
     return 0;
 }
 
+QString PracticeEmphasisPanelModel::editingValueAt(int index) const
+{
+    const QVariantList options = editingPartOptions();
+    if (index < 0 || index >= options.size()) {
+        return {};
+    }
+    return options.at(index).toMap().value(QStringLiteral("value")).toString();
+}
+
+QString PracticeEmphasisPanelModel::parentValueAt(int index) const
+{
+    const PracticeEmphasisData* emphasis = data();
+    if (!emphasis || index < 0) {
+        return {};
+    }
+    const std::vector<std::string> ids = emphasis->parentOptionIds(currentMaster(), editingPartId().toStdString());
+    if (static_cast<size_t>(index) >= ids.size()) {
+        return {};
+    }
+    return QString::fromStdString(ids.at(static_cast<size_t>(index)));
+}
+
+int PracticeEmphasisPanelModel::editingPartIndex() const
+{
+    return indexOfOptionValue(editingPartOptions(), editingPartId());
+}
+
 int PracticeEmphasisPanelModel::editingPartParentIndex() const
 {
-    return indexOfOptionValue(parentOptions(), editingPartParentId());
+    const PracticeEmphasisData* emphasis = data();
+    if (!emphasis) {
+        return 0;
+    }
+    return emphasis->parentOptionIndex(currentMaster(), editingPartId().toStdString(),
+                                       editingPartParentId().toStdString());
 }
 
 bool PracticeEmphasisPanelModel::solo() const
@@ -364,15 +394,21 @@ QVariantList PracticeEmphasisPanelModel::parentOptions() const
     none.insert(QStringLiteral("value"), QString());
     list.push_back(none);
 
+    const PracticeEmphasisData* emphasis = data();
+    if (!emphasis) {
+        return list;
+    }
+
     const std::string editingId = editingPartId().toStdString();
     const std::vector<PracticeEmphasisData::PartRule> parts = visibleParts(currentMaster());
-    for (const PracticeEmphasisData::PartRule& part : parts) {
-        if (part.id == editingId || isDescendantOf(parts, part.id, editingId)) {
+    for (const std::string& id : emphasis->parentOptionIds(currentMaster(), editingId)) {
+        if (id.empty()) {
             continue;
         }
+        const PracticeEmphasisData::PartRule* part = findVisible(parts, id);
         QVariantMap item;
-        item.insert(QStringLiteral("text"), dropdownLabel(part));
-        item.insert(QStringLiteral("value"), QString::fromStdString(part.id));
+        item.insert(QStringLiteral("text"), part ? dropdownLabel(*part) : QString::fromStdString(id));
+        item.insert(QStringLiteral("value"), QString::fromStdString(id));
         list.push_back(item);
     }
     return list;
@@ -391,24 +427,24 @@ bool PracticeEmphasisPanelModel::debugOverrideActive() const
 QString PracticeEmphasisPanelModel::selectionButtonText() const
 {
     if (!globalContext() || !globalContext()->currentNotation() || !globalContext()->currentNotation()->interaction()) {
-        return muse::qtrc("playback", "Selection");
+        return muse::qtrc("playback", "From Selection");
     }
     const INotationSelectionPtr selection = globalContext()->currentNotation()->interaction()->selection();
     if (!selection) {
-        return muse::qtrc("playback", "Selection");
+        return muse::qtrc("playback", "From Selection");
     }
     const int from = displayedMeasureNumber(selection->startMeasureBase());
     int to = displayedMeasureNumber(selection->endMeasureBase());
     if (from <= 0) {
-        return muse::qtrc("playback", "Selection");
+        return muse::qtrc("playback", "From Selection");
     }
     if (to <= 0) {
         to = from;
     }
     if (from == to) {
-        return muse::qtrc("playback", "Selection (%1)").arg(from);
+        return muse::qtrc("playback", "From Selection (%1)").arg(from);
     }
-    return muse::qtrc("playback", "Selection (%1–%2)").arg(from).arg(to);
+    return muse::qtrc("playback", "From Selection (%1–%2)").arg(from).arg(to);
 }
 
 void PracticeEmphasisPanelModel::setPlaybackActive(bool active)

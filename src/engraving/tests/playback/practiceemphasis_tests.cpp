@@ -1187,7 +1187,7 @@ TEST_F(Engraving_PracticeEmphasisTests, UndoRedoClicksResetAndDropsRedoTail)
 
     emphasis.setPartSelected(score, "S1", true);
     emphasis.setEditingPartId(score, "S1");
-    EXPECT_TRUE(emphasis.canUndo());
+    EXPECT_FALSE(emphasis.canUndo());
     EXPECT_FALSE(emphasis.canRedo());
 
     emphasis.editNote(d5);
@@ -1233,6 +1233,8 @@ TEST_F(Engraving_PracticeEmphasisTests, UndoRedoClicksResetAndDropsRedoTail)
     const std::string customId = emphasis.addCustomPart(score, "scratch", "S1");
     ASSERT_FALSE(customId.empty());
     EXPECT_EQ(emphasis.document().editingPartId, customId);
+    EXPECT_TRUE(emphasis.canUndo());
+
     emphasis.setPartName(customId, "A");
     emphasis.setPartName(customId, "AB");
     emphasis.setPartName(customId, "ABC");
@@ -1242,16 +1244,188 @@ TEST_F(Engraving_PracticeEmphasisTests, UndoRedoClicksResetAndDropsRedoTail)
     emphasis.undo();
     custom = findPart(emphasis.document().parts, customId);
     ASSERT_TRUE(custom);
-    EXPECT_EQ(custom->name, "scratch");
-    emphasis.undo();
-    EXPECT_EQ(findPart(emphasis.document().parts, customId), nullptr);
+    EXPECT_EQ(custom->name, "ABC");
+    EXPECT_EQ(custom->parentId, "S1");
+    EXPECT_FALSE(emphasis.partContains(alto, "S1"));
 
-    emphasis.redo();
-    EXPECT_TRUE(findPart(emphasis.document().parts, customId));
     EXPECT_TRUE(emphasis.deletePart(customId));
     EXPECT_EQ(findPart(emphasis.document().parts, customId), nullptr);
     emphasis.undo();
-    EXPECT_TRUE(findPart(emphasis.document().parts, customId));
+    EXPECT_EQ(findPart(emphasis.document().parts, customId), nullptr);
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, NameAndParentReloadAndParentDropdownIndex)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    Note* e5 = findPitch(score, 76);
+    Note* alto = findPitch(score, 67);
+    ASSERT_TRUE(e5);
+    ASSERT_TRUE(alto);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    const std::string customId = emphasis.addCustomPart(score, "sops", {});
+    ASSERT_FALSE(customId.empty());
+    EXPECT_EQ(emphasis.parentOptionIndex(score, customId, {}), 0);
+    EXPECT_FALSE(emphasis.partContains(e5, customId));
+
+    // Parent S1 is not yet in document.parts; ensurePart grows the vector.
+    emphasis.setPartParent(score, customId, "S1");
+    const PracticeEmphasisData::PartRule* custom = findPart(emphasis.document().parts, customId);
+    ASSERT_TRUE(custom);
+    EXPECT_EQ(custom->name, "sops");
+    EXPECT_EQ(custom->parentId, "S1");
+    EXPECT_TRUE(emphasis.partContains(e5, customId));
+    EXPECT_FALSE(emphasis.partContains(alto, customId));
+    const int s1Index = emphasis.parentOptionIndex(score, customId, "S1");
+    EXPECT_GT(s1Index, 0);
+    EXPECT_EQ(emphasis.parentOptionIds(score, customId).at(static_cast<size_t>(s1Index)), "S1");
+
+    // Choosing A1 (not the first parent option) must not map back to index 0 / "(none)".
+    emphasis.setPartParent(score, customId, "A1");
+    custom = findPart(emphasis.document().parts, customId);
+    ASSERT_TRUE(custom);
+    EXPECT_EQ(custom->parentId, "A1");
+    EXPECT_FALSE(emphasis.partContains(e5, customId));
+    EXPECT_TRUE(emphasis.partContains(alto, customId));
+    const int a1Index = emphasis.parentOptionIndex(score, customId, "A1");
+    EXPECT_GT(a1Index, 0);
+    EXPECT_NE(a1Index, s1Index);
+    EXPECT_EQ(emphasis.parentOptionIds(score, customId).at(static_cast<size_t>(a1Index)), "A1");
+
+    PracticeEmphasisData parsed;
+    EXPECT_TRUE(parsed.fromJson(emphasis.toJson()));
+    const PracticeEmphasisData::PartRule* parsedCustom = findPart(parsed.document().parts, customId);
+    ASSERT_TRUE(parsedCustom);
+    EXPECT_EQ(parsed.document().editingPartId, customId);
+    EXPECT_EQ(parsedCustom->name, "sops");
+    EXPECT_EQ(parsedCustom->parentId, "A1");
+    EXPECT_EQ(parsed.parentOptionIndex(score, customId, parsedCustom->parentId), a1Index);
+
+    ByteArray mscz;
+    ASSERT_TRUE(writeMscz(score, mscz));
+    ByteArray json;
+    ASSERT_TRUE(containerHasEmphasis(mscz, &json));
+    PracticeEmphasisData fromContainer;
+    EXPECT_TRUE(fromContainer.fromJson(json));
+    const PracticeEmphasisData::PartRule* containerCustom = findPart(fromContainer.document().parts, customId);
+    ASSERT_TRUE(containerCustom);
+    EXPECT_EQ(containerCustom->name, "sops");
+    EXPECT_EQ(containerCustom->parentId, "A1");
+
+    MasterScore* reloaded = compat::ScoreAccess::createMasterScoreWithBaseStyle(score->iocContext());
+    reloaded->setFileInfoProvider(std::make_shared<LocalFileInfoProvider>("practice-emphasis-roundtrip.mscz"));
+    {
+        muse::io::Buffer buffer(&mscz);
+        MscReader::Params params;
+        params.device = &buffer;
+        params.filePath = "practice-emphasis-roundtrip.mscz";
+        params.mode = MscIoMode::Zip;
+        MscReader reader(params);
+        ASSERT_TRUE(reader.open());
+        MscLoader loader;
+        const muse::Ret loaded = loader.loadMscz(reloaded, reader, nullptr, true);
+        ASSERT_TRUE(loaded) << loaded.toString();
+    }
+    for (Score* each : reloaded->scoreList()) {
+        each->doLayout();
+    }
+    reloaded->initAutomation();
+
+    PracticeEmphasisData& reloadedEmphasis = reloaded->practiceEmphasis();
+    EXPECT_EQ(reloadedEmphasis.document().editingPartId, customId);
+    const PracticeEmphasisData::PartRule* reloadedCustom = findPart(reloadedEmphasis.document().parts, customId);
+    ASSERT_TRUE(reloadedCustom);
+    EXPECT_EQ(reloadedCustom->name, "sops");
+    EXPECT_EQ(reloadedCustom->parentId, "A1");
+    const int reloadedIndex = reloadedEmphasis.parentOptionIndex(reloaded, customId, reloadedCustom->parentId);
+    EXPECT_GT(reloadedIndex, 0);
+    EXPECT_EQ(reloadedEmphasis.parentOptionIds(reloaded, customId).at(static_cast<size_t>(reloadedIndex)), "A1");
+
+    Note* reloadedE5 = findPitch(reloaded, 76);
+    Note* reloadedAlto = findPitch(reloaded, 67);
+    ASSERT_TRUE(reloadedE5);
+    ASSERT_TRUE(reloadedAlto);
+    EXPECT_FALSE(reloadedEmphasis.partContains(reloadedE5, customId));
+    EXPECT_TRUE(reloadedEmphasis.partContains(reloadedAlto, customId));
+
+    delete reloaded;
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, SidecarJsonLoadsCustomNameAndParentKeys)
+{
+    PracticeEmphasisData parsed;
+    const muse::ByteArray json(
+        "{"
+        "\"version\":3,"
+        "\"editingPartId\":\"custom-1\","
+        "\"parts\":["
+        "{\"id\":\"S1\",\"name\":\"1st soprano\",\"staffIndex\":0,\"voice\":0,\"role\":\"top\",\"builtin\":true,\"selected\":true},"
+        "{\"id\":\"custom-1\",\"name\":\"sops\",\"staffIndex\":0,\"voice\":0,\"role\":\"top\",\"builtin\":false,\"parentId\":\"A1\"}"
+        "]"
+        "}");
+    EXPECT_TRUE(parsed.fromJson(json));
+    EXPECT_EQ(parsed.document().editingPartId, "custom-1");
+    const PracticeEmphasisData::PartRule* custom = findPart(parsed.document().parts, "custom-1");
+    ASSERT_TRUE(custom);
+    EXPECT_EQ(custom->name, "sops");
+    EXPECT_EQ(custom->parentId, "A1");
+    EXPECT_FALSE(custom->builtin);
+
+    const muse::ByteArray written = parsed.toJson();
+    const std::string text(written.constChar(), written.size());
+    EXPECT_NE(text.find("sops"), std::string::npos);
+    EXPECT_NE(text.find("parentId"), std::string::npos);
+    EXPECT_NE(text.find("A1"), std::string::npos);
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, UndoParentKeepsNameAndSettings)
+{
+    ScoreEmphasisGuard environment;
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    const std::string customId = emphasis.addCustomPart(score, "sops", "S1");
+    ASSERT_FALSE(customId.empty());
+    EXPECT_FALSE(emphasis.canUndo());
+
+    emphasis.setSolo(true);
+    emphasis.setPartName(customId, "renamed");
+    emphasis.setPartSelected(score, customId, true);
+    emphasis.setRange(1, 2);
+    EXPECT_FALSE(emphasis.canUndo());
+
+    emphasis.setPartParent(score, customId, "A1");
+    EXPECT_TRUE(emphasis.canUndo());
+    const PracticeEmphasisData::PartRule* custom = findPart(emphasis.document().parts, customId);
+    ASSERT_TRUE(custom);
+    EXPECT_EQ(custom->parentId, "A1");
+    EXPECT_EQ(custom->name, "renamed");
+    EXPECT_GT(emphasis.parentOptionIndex(score, customId, "A1"), 0);
+
+    emphasis.undo();
+    custom = findPart(emphasis.document().parts, customId);
+    ASSERT_TRUE(custom);
+    EXPECT_EQ(custom->parentId, "S1");
+    EXPECT_EQ(custom->name, "renamed");
+    EXPECT_TRUE(emphasis.document().solo);
+    EXPECT_TRUE(emphasis.partSelected(customId));
+    EXPECT_EQ(emphasis.document().fromMeasure, 1);
+    EXPECT_EQ(emphasis.document().toMeasure, 2);
+    EXPECT_GT(emphasis.parentOptionIndex(score, customId, "S1"), 0);
+
+    emphasis.redo();
+    custom = findPart(emphasis.document().parts, customId);
+    ASSERT_TRUE(custom);
+    EXPECT_EQ(custom->parentId, "A1");
+    EXPECT_EQ(custom->name, "renamed");
+    EXPECT_TRUE(emphasis.document().solo);
 
     delete score;
 }

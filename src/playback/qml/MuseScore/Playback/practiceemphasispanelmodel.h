@@ -54,6 +54,7 @@ class PracticeEmphasisPanelModel : public QObject, public muse::Contextable, pub
     Q_PROPERTY(QString editingPartName READ editingPartName NOTIFY stateChanged)
     Q_PROPERTY(bool editingPartBuiltin READ editingPartBuiltin NOTIFY stateChanged)
     Q_PROPERTY(QString editingPartParentId READ editingPartParentId NOTIFY stateChanged)
+    Q_PROPERTY(int editingPartIndex READ editingPartIndex NOTIFY stateChanged)
     Q_PROPERTY(int editingPartParentIndex READ editingPartParentIndex NOTIFY stateChanged)
     Q_PROPERTY(bool solo READ solo WRITE setSolo NOTIFY stateChanged)
     Q_PROPERTY(QVariantList parentOptions READ parentOptions NOTIFY stateChanged)
@@ -88,6 +89,8 @@ public:
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE void copyFromPart();
+    Q_INVOKABLE QString parentValueAt(int index) const;
+    Q_INVOKABLE QString editingValueAt(int index) const;
 
     bool hasScore() const;
     bool playbackActive() const;
@@ -102,6 +105,7 @@ public:
     QString editingPartName() const;
     bool editingPartBuiltin() const;
     QString editingPartParentId() const;
+    int editingPartIndex() const;
     int editingPartParentIndex() const;
     bool solo() const;
     QVariantList parentOptions() const;
@@ -127,6 +131,7 @@ public:
 
 signals:
     void stateChanged();
+    void editingPartChanged();
 
 private:
     engraving::MasterScore* currentMaster() const;

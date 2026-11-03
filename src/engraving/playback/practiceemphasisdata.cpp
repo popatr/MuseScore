@@ -49,6 +49,17 @@ bool isBuiltinPartId(const std::string& id)
            || id == "T1" || id == "T2" || id == "B1" || id == "B2";
 }
 
+const PracticeEmphasisData::PartRule* findRuleById(const std::vector<PracticeEmphasisData::PartRule>& parts,
+                                                   const std::string& id)
+{
+    for (const PracticeEmphasisData::PartRule& part : parts) {
+        if (part.id == id) {
+            return &part;
+        }
+    }
+    return nullptr;
+}
+
 const char* roleToString(PracticeEmphasisData::Role role)
 {
     switch (role) {
@@ -425,6 +436,7 @@ bool PracticeEmphasisData::fromJson(const muse::ByteArray& json)
 
     m_document = std::move(next);
     resetHistory();
+    notifyListeners();
     return true;
 }
 
@@ -433,9 +445,8 @@ void PracticeEmphasisData::setPlaybackActive(bool active)
     if (m_document.playbackActive == active) {
         return;
     }
-    const Document before = m_document;
     m_document.playbackActive = active;
-    commitEdit(before);
+    applyNonUndoableChange();
 }
 
 void PracticeEmphasisData::setEmphasisMode(bool enabled)
@@ -443,9 +454,8 @@ void PracticeEmphasisData::setEmphasisMode(bool enabled)
     if (m_document.emphasisMode == enabled) {
         return;
     }
-    const Document before = m_document;
     m_document.emphasisMode = enabled;
-    commitEdit(before);
+    applyNonUndoableChange();
 }
 
 void PracticeEmphasisData::setGains(float emphasizedDb, float otherDb)
@@ -453,10 +463,9 @@ void PracticeEmphasisData::setGains(float emphasizedDb, float otherDb)
     if (m_document.emphasizedDb == emphasizedDb && m_document.otherDb == otherDb) {
         return;
     }
-    const Document before = m_document;
     m_document.emphasizedDb = emphasizedDb;
     m_document.otherDb = otherDb;
-    commitEdit(before);
+    applyNonUndoableChange();
 }
 
 void PracticeEmphasisData::setRange(int fromMeasure, int toMeasure)
@@ -466,10 +475,9 @@ void PracticeEmphasisData::setRange(int fromMeasure, int toMeasure)
     if (m_document.fromMeasure == fromMeasure && m_document.toMeasure == toMeasure) {
         return;
     }
-    const Document before = m_document;
     m_document.fromMeasure = fromMeasure;
     m_document.toMeasure = toMeasure;
-    commitEdit(before);
+    applyNonUndoableChange();
 }
 
 const PracticeEmphasisData::PartRule* PracticeEmphasisData::findPart(const std::string& id) const
@@ -576,12 +584,11 @@ void PracticeEmphasisData::setPartSelected(const Score* score, const std::string
     if (existing->selected == selected) {
         return;
     }
-    const Document before = m_document;
     existing->selected = selected;
     if (selected && m_document.editingPartId.empty()) {
         m_document.editingPartId = id;
     }
-    commitEdit(before);
+    applyNonUndoableChange();
 }
 
 void PracticeEmphasisData::setEditingPartId(const Score* score, const std::string& id)
@@ -595,9 +602,8 @@ void PracticeEmphasisData::setEditingPartId(const Score* score, const std::strin
     if (m_document.editingPartId == id) {
         return;
     }
-    const Document before = m_document;
     m_document.editingPartId = id;
-    commitEdit(before);
+    applyNonUndoableChange();
 }
 
 void PracticeEmphasisData::setSolo(bool enabled)
@@ -605,9 +611,8 @@ void PracticeEmphasisData::setSolo(bool enabled)
     if (m_document.solo == enabled) {
         return;
     }
-    const Document before = m_document;
     m_document.solo = enabled;
-    commitEdit(before);
+    applyNonUndoableChange();
 }
 
 void PracticeEmphasisData::setPartName(const std::string& id, const std::string& name)
@@ -616,9 +621,8 @@ void PracticeEmphasisData::setPartName(const std::string& id, const std::string&
     if (!part || part->builtin || part->name == name) {
         return;
     }
-    const Document before = m_document;
     part->name = name;
-    commitEdit(before, "name:" + id);
+    applyNonUndoableChange();
 }
 
 bool PracticeEmphasisData::wouldCreateCycle(const std::string& childId, const std::string& parentId) const
@@ -650,21 +654,50 @@ void PracticeEmphasisData::setPartParent(const Score* score, const std::string& 
     if (!part || part->builtin) {
         return;
     }
-    std::string nextParent = parentId;
-    if (nextParent == part->parentId) {
+    if (parentId == part->parentId) {
         return;
     }
     const Document before = m_document;
-    if (!nextParent.empty()) {
-        if (wouldCreateCycle(id, nextParent)) {
+    if (!parentId.empty()) {
+        if (wouldCreateCycle(id, parentId)) {
             return;
         }
-        if (!ensurePart(score, nextParent) && !findPart(nextParent)) {
+        if (!ensurePart(score, parentId) && !findPart(parentId)) {
             return;
         }
     }
-    part->parentId = std::move(nextParent);
+    // ensurePart may grow parts and invalidate the earlier pointer.
+    part = findPart(id);
+    if (!part) {
+        return;
+    }
+    part->parentId = parentId;
     commitEdit(before);
+}
+
+std::vector<std::string> PracticeEmphasisData::parentOptionIds(const Score* score, const std::string& childId) const
+{
+    std::vector<std::string> ids;
+    ids.emplace_back();
+    for (const PartRule& part : visibleParts(score)) {
+        if (wouldCreateCycle(childId, part.id)) {
+            continue;
+        }
+        ids.push_back(part.id);
+    }
+    return ids;
+}
+
+int PracticeEmphasisData::parentOptionIndex(const Score* score, const std::string& childId,
+                                           const std::string& parentId) const
+{
+    const std::vector<std::string> ids = parentOptionIds(score, childId);
+    for (size_t i = 0; i < ids.size(); ++i) {
+        if (ids[i] == parentId) {
+            return static_cast<int>(i);
+        }
+    }
+    return 0;
 }
 
 std::string PracticeEmphasisData::addCustomPart(const Score* score, const std::string& name, const std::string& parentId)
@@ -676,7 +709,6 @@ std::string PracticeEmphasisData::addCustomPart(const Score* score, const std::s
         id = "custom-" + std::to_string(index);
     }
 
-    const Document before = m_document;
     PartRule part;
     part.id = id;
     part.name = name.empty() ? ("Custom " + std::to_string(index)) : name;
@@ -688,7 +720,7 @@ std::string PracticeEmphasisData::addCustomPart(const Score* score, const std::s
     }
     m_document.parts.push_back(std::move(part));
     m_document.editingPartId = id;
-    commitEdit(before);
+    applyNonUndoableChange();
     return id;
 }
 
@@ -699,7 +731,6 @@ bool PracticeEmphasisData::deletePart(const std::string& id)
         return false;
     }
 
-    const Document before = m_document;
     m_document.parts.erase(std::remove_if(m_document.parts.begin(), m_document.parts.end(), [&](const PartRule& candidate) {
         return candidate.id == id;
     }), m_document.parts.end());
@@ -715,7 +746,7 @@ bool PracticeEmphasisData::deletePart(const std::string& id)
             m_document.editingPartId = m_document.parts.front().id;
         }
     }
-    commitEdit(before);
+    applyNonUndoableChange();
     return true;
 }
 
@@ -1068,6 +1099,54 @@ void PracticeEmphasisData::resetHistory()
     m_history.push_back(m_document);
     m_historyIndex = 0;
     m_coalesceKey.clear();
+}
+
+void PracticeEmphasisData::projectNonUndoableFields(Document& snap) const
+{
+    snap.version = m_document.version;
+    snap.playbackActive = m_document.playbackActive;
+    snap.emphasisMode = m_document.emphasisMode;
+    snap.emphasizedDb = m_document.emphasizedDb;
+    snap.otherDb = m_document.otherDb;
+    snap.fromMeasure = m_document.fromMeasure;
+    snap.toMeasure = m_document.toMeasure;
+    snap.solo = m_document.solo;
+    snap.editingPartId = m_document.editingPartId;
+
+    std::vector<PartRule> next;
+    next.reserve(m_document.parts.size());
+    for (const PartRule& live : m_document.parts) {
+        PartRule part = live;
+        if (const PartRule* old = findRuleById(snap.parts, live.id)) {
+            part.parentId = old->parentId;
+            part.added = old->added;
+            part.removed = old->removed;
+        }
+        if (!part.parentId.empty() && !isBuiltinPartId(part.parentId)
+            && !findRuleById(m_document.parts, part.parentId)) {
+            part.parentId.clear();
+        }
+        next.push_back(std::move(part));
+    }
+    snap.parts = std::move(next);
+}
+
+void PracticeEmphasisData::applyNonUndoableChange()
+{
+    if (m_applyingHistory) {
+        notifyListeners();
+        return;
+    }
+    m_coalesceKey.clear();
+    if (m_history.empty()) {
+        m_history.push_back(m_document);
+        m_historyIndex = 0;
+    } else {
+        for (Document& snap : m_history) {
+            projectNonUndoableFields(snap);
+        }
+    }
+    notifyListeners();
 }
 
 void PracticeEmphasisData::commitEdit(const Document& before, const std::string& coalesceKey)

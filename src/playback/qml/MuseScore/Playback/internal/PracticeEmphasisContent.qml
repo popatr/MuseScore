@@ -40,8 +40,10 @@ Item {
 
     readonly property bool narrow: width > 0 && width < 480
     readonly property int partCount: root.emphasisModel.parts ? root.emphasisModel.parts.length : 0
-    readonly property int partNavStart: root.navigationOrderStart + 8
+    readonly property int partNavStart: root.navigationOrderStart + 10
     readonly property int editingNavStart: root.partNavStart + Math.max(root.partCount, 1)
+
+    property bool syncingEditingFields: false
 
     function showCheckBoxTooltip(item, title, description) {
         if (item.hovered) {
@@ -56,6 +58,64 @@ Item {
             ui.tooltip.hide(item, true)
         }
     }
+
+    function setDropdownIndex(dropdown, index) {
+        if (!dropdown) {
+            return
+        }
+        var next = index >= 0 ? index : 0
+        if (dropdown.currentIndex !== next) {
+            dropdown.currentIndex = next
+        }
+    }
+
+    function setNameFieldText(name) {
+        if (!nameField) {
+            return
+        }
+        var next = name ? name : ""
+        if (nameField.currentText !== next) {
+            nameField.currentText = next
+        }
+        if (nameField.inputField && nameField.inputField.text !== next) {
+            nameField.inputField.text = next
+        }
+    }
+
+    function syncEditingPartFields() {
+        if (root.syncingEditingFields || !root.emphasisModel) {
+            return
+        }
+        root.syncingEditingFields = true
+
+        if (editingDropdown) {
+            root.setDropdownIndex(editingDropdown, root.emphasisModel.editingPartIndex)
+        }
+
+        if (root.emphasisModel.hasScore && !root.emphasisModel.editingPartBuiltin) {
+            root.setNameFieldText(root.emphasisModel.editingPartName)
+            if (parentDropdown) {
+                root.setDropdownIndex(parentDropdown, root.emphasisModel.editingPartParentIndex)
+            }
+            if (copySourceDropdown) {
+                root.setDropdownIndex(copySourceDropdown, root.emphasisModel.copySourceIndex)
+            }
+        }
+
+        root.syncingEditingFields = false
+    }
+
+    Connections {
+        target: root.emphasisModel
+        function onEditingPartChanged() {
+            Qt.callLater(root.syncEditingPartFields)
+        }
+        function onStateChanged() {
+            Qt.callLater(root.syncEditingPartFields)
+        }
+    }
+
+    Component.onCompleted: Qt.callLater(root.syncEditingPartFields)
 
     implicitWidth: 560
     implicitHeight: contentColumn.implicitHeight
@@ -180,10 +240,15 @@ Item {
             }
         }
 
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 8
-            visible: tabBar.currentIndex === 1
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                visible: tabBar.currentIndex === 1
+                onVisibleChanged: {
+                    if (visible) {
+                        Qt.callLater(root.syncEditingPartFields)
+                    }
+                }
 
             GridLayout {
                 Layout.fillWidth: true
@@ -225,17 +290,15 @@ Item {
                     Layout.fillWidth: true
                     enabled: root.emphasisModel.hasScore
                     model: root.emphasisModel.editingPartOptions
-                    currentIndex: {
-                        var index = indexOfValue(root.emphasisModel.editingPartId)
-                        return index >= 0 ? index : 0
-                    }
                     navigation.panel: root.navigationPanel
                     navigation.order: root.editingNavStart + 2
                     navigation.name: "EditingPartDropdown"
                     navigation.accessible.description: qsTrc("playback", "Clicks in highlight mode add or remove notes on this part only.")
                     onActivated: function(index, value) {
-                        root.emphasisModel.editingPartId = value
+                        root.emphasisModel.editingPartId = root.emphasisModel.editingValueAt(index)
+                        Qt.callLater(root.syncEditingPartFields)
                     }
+                    onModelChanged: Qt.callLater(root.syncEditingPartFields)
                 }
 
                 FlatButton {
@@ -261,144 +324,109 @@ Item {
                 }
             }
 
-            CheckBox {
-                text: qsTrc("playback", "Solo")
-                checked: root.emphasisModel.solo
-                enabled: root.emphasisModel.hasScore
-                navigation.panel: root.navigationPanel
-                navigation.order: root.editingNavStart + 5
-                navigation.accessible.description: qsTrc("playback", "Playback and export use only the part being edited. Checked parts stay as they are.")
-                onHoveredChanged: root.showCheckBoxTooltip(this, qsTrc("playback", "Solo"),
-                                                           navigation.accessible.description)
-                onPressedChanged: root.hideCheckBoxTooltipOnPress(this)
-                onClicked: root.emphasisModel.solo = !checked
-            }
-
-            Repeater {
-                model: (root.emphasisModel.hasScore && !root.emphasisModel.editingPartBuiltin)
-                       ? [root.emphasisModel.editingPartId] : []
-
-                delegate: ColumnLayout {
-                    id: customPartEditors
-
-                    required property string modelData
-
-                    Layout.fillWidth: true
-                    spacing: 8
-
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: root.narrow ? 1 : 2
-                        columnSpacing: 8
-                        rowSpacing: 8
-
-                        StyledTextLabel {
-                            text: qsTrc("playback", "Name")
-                        }
-
-                        TextInputField {
-                            Layout.fillWidth: true
-                            currentText: root.emphasisModel.editingPartName
-                            navigation.panel: root.navigationPanel
-                            navigation.order: root.editingNavStart + 6
-                            onTextChanged: function(newTextValue) {
-                                root.emphasisModel.applyEditingPartName(customPartEditors.modelData, newTextValue)
-                            }
-                            onTextEditingFinished: function(newTextValue) {
-                                root.emphasisModel.applyEditingPartName(customPartEditors.modelData, newTextValue)
-                            }
-                        }
-
-                        StyledTextLabel {
-                            text: qsTrc("playback", "Parent")
-                        }
-
-                        StyledDropdown {
-                            Layout.fillWidth: true
-                            model: root.emphasisModel.parentOptions
-                            currentIndex: {
-                                // Depend on model so a freshly created dropdown does not stick on (none).
-                                var count = model ? model.length : 0
-                                return count > 0 ? root.emphasisModel.editingPartParentIndex : 0
-                            }
-                            navigation.panel: root.navigationPanel
-                            navigation.order: root.editingNavStart + 7
-                            navigation.name: "ParentPartDropdown"
-                            navigation.accessible.description: qsTrc("playback", "Notes this part inherits before its own added and removed clicks.")
-                            onActivated: function(index, value) {
-                                root.emphasisModel.applyEditingPartParentId(customPartEditors.modelData, value)
-                            }
-                        }
-                    }
-                }
-            }
-
-            GridLayout {
+            ColumnLayout {
+                id: customPartEditors
                 Layout.fillWidth: true
+                spacing: 8
                 visible: root.emphasisModel.hasScore && !root.emphasisModel.editingPartBuiltin
-                columns: root.narrow ? 1 : 3
-                columnSpacing: 8
-                rowSpacing: 8
-
-                StyledTextLabel {
-                    text: qsTrc("playback", "Copy from")
-                }
-
-                StyledDropdown {
-                    Layout.fillWidth: true
-                    enabled: root.emphasisModel.canCopyFromPart
-                    model: root.emphasisModel.copySourceOptions
-                    currentIndex: {
-                        var count = model ? model.length : 0
-                        return count > 0 ? root.emphasisModel.copySourceIndex : 0
-                    }
-                    navigation.panel: root.navigationPanel
-                    navigation.order: root.editingNavStart + 8
-                    navigation.name: "CopySourceDropdown"
-                    navigation.accessible.description: qsTrc("playback", "Choose the part whose current notes will be copied onto this custom part.")
-                    onActivated: function(index, value) {
-                        root.emphasisModel.copySourceId = value
+                onVisibleChanged: {
+                    if (visible) {
+                        root.syncEditingPartFields()
                     }
                 }
 
-                FlatButton {
-                    Layout.fillWidth: root.narrow
-                    text: qsTrc("playback", "Copy")
-                    enabled: root.emphasisModel.canCopyFromPart
-                    toolTipTitle: qsTrc("playback", "Copy")
-                    toolTipDescription: qsTrc("playback", "Copy another part’s current notes onto this custom part as its own added and removed notes, relative to its parent or to none. One undoable step.")
-                    navigation.panel: root.navigationPanel
-                    navigation.order: root.editingNavStart + 9
-                    onClicked: root.emphasisModel.copyFromPart()
-                }
-            }
-
-            GridLayout {
-                Layout.fillWidth: true
-                columns: root.narrow ? 1 : 2
-                columnSpacing: 8
-                rowSpacing: 8
-
-                FlatButton {
+                GridLayout {
                     Layout.fillWidth: true
-                    text: root.emphasisModel.selectionButtonText
-                    enabled: root.emphasisModel.hasScore
-                    toolTipTitle: qsTrc("playback", "Selection")
-                    toolTipDescription: qsTrc("playback", "Set the measure range from the current score selection.")
-                    navigation.panel: root.navigationPanel
-                    navigation.order: root.editingNavStart + 10
-                    onClicked: root.emphasisModel.useSelectionRange()
+                    columns: root.narrow ? 1 : 2
+                    columnSpacing: 8
+                    rowSpacing: 8
+
+                    StyledTextLabel {
+                        text: qsTrc("playback", "Name")
+                    }
+
+                    TextInputField {
+                        id: nameField
+                        Layout.fillWidth: true
+                        navigation.panel: root.navigationPanel
+                        navigation.order: root.editingNavStart + 5
+                        onTextChanged: function(newTextValue) {
+                            if (root.syncingEditingFields) {
+                                return
+                            }
+                            root.emphasisModel.applyEditingPartName(root.emphasisModel.editingPartId, newTextValue)
+                        }
+                        onTextEditingFinished: function(newTextValue) {
+                            if (root.syncingEditingFields) {
+                                return
+                            }
+                            root.emphasisModel.applyEditingPartName(root.emphasisModel.editingPartId, newTextValue)
+                        }
+                    }
+
+                    StyledTextLabel {
+                        text: qsTrc("playback", "Parent")
+                    }
+
+                    StyledDropdown {
+                        id: parentDropdown
+                        Layout.fillWidth: true
+                        model: root.emphasisModel.parentOptions
+                        navigation.panel: root.navigationPanel
+                        navigation.order: root.editingNavStart + 6
+                        navigation.name: "ParentPartDropdown"
+                        navigation.accessible.description: qsTrc("playback", "Notes this part inherits before its own added and removed clicks.")
+                        onModelChanged: Qt.callLater(root.syncEditingPartFields)
+                        onActivated: function(index, value) {
+                            if (root.syncingEditingFields) {
+                                return
+                            }
+                            root.emphasisModel.applyEditingPartParentId(root.emphasisModel.editingPartId,
+                                                                        root.emphasisModel.parentValueAt(index))
+                            Qt.callLater(root.syncEditingPartFields)
+                        }
+                    }
                 }
 
-                FlatButton {
+                GridLayout {
                     Layout.fillWidth: true
-                    text: qsTrc("playback", "All")
-                    enabled: root.emphasisModel.hasScore
-                    toolTipTitle: qsTrc("playback", "All")
-                    toolTipDescription: qsTrc("playback", "Clear the measure range so emphasis uses the whole score.")
-                    navigation.panel: root.navigationPanel
-                    navigation.order: root.editingNavStart + 11
-                    onClicked: root.emphasisModel.clearMeasureRange()
+                    columns: root.narrow ? 1 : 3
+                    columnSpacing: 8
+                    rowSpacing: 8
+
+                    StyledTextLabel {
+                        text: qsTrc("playback", "Copy from")
+                    }
+
+                    StyledDropdown {
+                        id: copySourceDropdown
+                        Layout.fillWidth: true
+                        enabled: root.emphasisModel.canCopyFromPart
+                        model: root.emphasisModel.copySourceOptions
+                        navigation.panel: root.navigationPanel
+                        navigation.order: root.editingNavStart + 7
+                        navigation.name: "CopySourceDropdown"
+                        navigation.accessible.description: qsTrc("playback", "Choose the part whose current notes will be copied onto this custom part.")
+                        onModelChanged: Qt.callLater(root.syncEditingPartFields)
+                        onActivated: function(index, value) {
+                            if (root.syncingEditingFields) {
+                                return
+                            }
+                            root.emphasisModel.copySourceId = value
+                            Qt.callLater(root.syncEditingPartFields)
+                        }
+                    }
+
+                    FlatButton {
+                        Layout.fillWidth: root.narrow
+                        text: qsTrc("playback", "Copy")
+                        enabled: root.emphasisModel.canCopyFromPart
+                        toolTipTitle: qsTrc("playback", "Copy")
+                        toolTipDescription: qsTrc("playback", "Copy another part’s current notes onto this custom part as its own added and removed notes, relative to its parent or to none. One undoable step.")
+                        navigation.panel: root.navigationPanel
+                        navigation.order: root.editingNavStart + 8
+                        onClicked: root.emphasisModel.copyFromPart()
+                    }
                 }
             }
 
@@ -411,7 +439,7 @@ Item {
                 toolTipTitle: qsTrc("playback", "Reset this part’s edits")
                 toolTipDescription: qsTrc("playback", "Remove only this part’s added and removed clicks. Notes from the rule or parent come back.")
                 navigation.panel: root.navigationPanel
-                navigation.order: root.editingNavStart + 12
+                navigation.order: root.editingNavStart + 9
                 onClicked: root.emphasisModel.resetEditingPartEdits()
             }
         }
@@ -447,6 +475,19 @@ Item {
                 onClicked: root.emphasisModel.emphasisMode = !checked
             }
 
+            CheckBox {
+                text: qsTrc("playback", "Solo")
+                checked: root.emphasisModel.solo
+                enabled: root.emphasisModel.hasScore
+                navigation.panel: root.navigationPanel
+                navigation.order: root.navigationOrderStart + 2
+                navigation.accessible.description: qsTrc("playback", "Playback and export use only the part being edited. Checked parts stay as they are.")
+                onHoveredChanged: root.showCheckBoxTooltip(this, qsTrc("playback", "Solo"),
+                                                           navigation.accessible.description)
+                onPressedChanged: root.hideCheckBoxTooltipOnPress(this)
+                onClicked: root.emphasisModel.solo = !checked
+            }
+
             GridLayout {
                 Layout.fillWidth: true
                 columns: root.narrow ? 2 : 4
@@ -467,7 +508,7 @@ Item {
                     measureUnitsSymbol: qsTrc("playback", "dB")
                     enabled: root.emphasisModel.hasScore
                     navigation.panel: root.navigationPanel
-                    navigation.order: root.navigationOrderStart + 2
+                    navigation.order: root.navigationOrderStart + 3
                     navigation.accessible.description: qsTrc("playback", "Gain in decibels for notes that belong to a checked part.")
                     onValueEdited: function(newValue) {
                         root.emphasisModel.emphasizedDb = newValue
@@ -488,7 +529,7 @@ Item {
                     measureUnitsSymbol: qsTrc("playback", "dB")
                     enabled: root.emphasisModel.hasScore
                     navigation.panel: root.navigationPanel
-                    navigation.order: root.navigationOrderStart + 3
+                    navigation.order: root.navigationOrderStart + 4
                     navigation.accessible.description: qsTrc("playback", "Gain in decibels for notes that do not belong to any checked part.")
                     onValueEdited: function(newValue) {
                         root.emphasisModel.otherDb = newValue
@@ -498,7 +539,7 @@ Item {
 
             GridLayout {
                 Layout.fillWidth: true
-                columns: root.narrow ? 2 : 4
+                columns: root.narrow ? 2 : 6
                 columnSpacing: 12
                 rowSpacing: 8
 
@@ -515,7 +556,7 @@ Item {
                     decimals: 0
                     enabled: root.emphasisModel.hasScore
                     navigation.panel: root.navigationPanel
-                    navigation.order: root.navigationOrderStart + 4
+                    navigation.order: root.navigationOrderStart + 5
                     navigation.accessible.description: qsTrc("playback", "First measure of the emphasis range. 0 is the whole score.")
                     onValueEdited: function(newValue) {
                         root.emphasisModel.fromMeasure = newValue
@@ -535,11 +576,33 @@ Item {
                     decimals: 0
                     enabled: root.emphasisModel.hasScore
                     navigation.panel: root.navigationPanel
-                    navigation.order: root.navigationOrderStart + 5
+                    navigation.order: root.navigationOrderStart + 6
                     navigation.accessible.description: qsTrc("playback", "Last measure of the emphasis range. 0 is the whole score.")
                     onValueEdited: function(newValue) {
                         root.emphasisModel.toMeasure = newValue
                     }
+                }
+
+                FlatButton {
+                    Layout.fillWidth: true
+                    text: root.emphasisModel.selectionButtonText
+                    enabled: root.emphasisModel.hasScore
+                    toolTipTitle: qsTrc("playback", "From Selection")
+                    toolTipDescription: qsTrc("playback", "Set the measure range from the current score selection.")
+                    navigation.panel: root.navigationPanel
+                    navigation.order: root.navigationOrderStart + 7
+                    onClicked: root.emphasisModel.useSelectionRange()
+                }
+
+                FlatButton {
+                    Layout.fillWidth: true
+                    text: qsTrc("playback", "All")
+                    enabled: root.emphasisModel.hasScore
+                    toolTipTitle: qsTrc("playback", "All")
+                    toolTipDescription: qsTrc("playback", "Clear the measure range so emphasis uses the whole score.")
+                    navigation.panel: root.navigationPanel
+                    navigation.order: root.navigationOrderStart + 8
+                    onClicked: root.emphasisModel.clearMeasureRange()
                 }
             }
 
