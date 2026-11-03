@@ -37,6 +37,20 @@ StyledPopupView {
     contentHeight: contentColumn.implicitHeight
     placementPolicies: PopupView.PreferBelow | PopupView.IgnoreFit
 
+    function showCheckBoxTooltip(item, title, description) {
+        if (item.hovered) {
+            ui.tooltip.show(item, title, description)
+        } else {
+            ui.tooltip.hide(item)
+        }
+    }
+
+    function hideCheckBoxTooltipOnPress(item) {
+        if (item.pressed) {
+            ui.tooltip.hide(item, true)
+        }
+    }
+
     NavigationPanel {
         id: navPanel
         name: "PracticeEmphasisPopup"
@@ -86,10 +100,12 @@ StyledPopupView {
             text: qsTrc("playback", "Highlight notes and click to edit")
             checked: root.emphasisModel.emphasisMode
             enabled: root.emphasisModel.hasScore
-            toolTipTitle: qsTrc("playback", "Highlight notes and click to edit")
-            toolTipDescription: qsTrc("playback", "Color the edited part red. Click a note to add or remove it on that part only.")
             navigation.panel: navPanel
             navigation.order: 2
+            navigation.accessible.description: qsTrc("playback", "Color the edited part red. Click a note to add or remove it on that part only.")
+            onHoveredChanged: root.showCheckBoxTooltip(this, qsTrc("playback", "Highlight notes and click to edit"),
+                                                       navigation.accessible.description)
+            onPressedChanged: root.hideCheckBoxTooltipOnPress(this)
             onClicked: root.emphasisModel.emphasisMode = !checked
         }
 
@@ -110,10 +126,9 @@ StyledPopupView {
                 decimals: 0
                 measureUnitsSymbol: qsTrc("playback", "dB")
                 enabled: root.emphasisModel.hasScore
-                toolTipTitle: qsTrc("playback", "Emphasized")
-                toolTipDescription: qsTrc("playback", "Gain in decibels for notes that belong to a checked part.")
                 navigation.panel: navPanel
                 navigation.order: 3
+                navigation.accessible.description: qsTrc("playback", "Gain in decibels for notes that belong to a checked part.")
                 onValueEdited: function(newValue) {
                     root.emphasisModel.emphasizedDb = newValue
                 }
@@ -132,10 +147,9 @@ StyledPopupView {
                 decimals: 0
                 measureUnitsSymbol: qsTrc("playback", "dB")
                 enabled: root.emphasisModel.hasScore
-                toolTipTitle: qsTrc("playback", "Others")
-                toolTipDescription: qsTrc("playback", "Gain in decibels for notes that do not belong to any checked part.")
                 navigation.panel: navPanel
                 navigation.order: 4
+                navigation.accessible.description: qsTrc("playback", "Gain in decibels for notes that do not belong to any checked part.")
                 onValueEdited: function(newValue) {
                     root.emphasisModel.otherDb = newValue
                 }
@@ -235,8 +249,9 @@ StyledPopupView {
                     text: modelData.label
                     checked: modelData.selected
                     enabled: modelData.available
-                    toolTipTitle: modelData.label
-                    toolTipDescription: modelData.tooltip
+                    navigation.accessible.description: modelData.tooltip
+                    onHoveredChanged: root.showCheckBoxTooltip(this, modelData.label, modelData.tooltip)
+                    onPressedChanged: root.hideCheckBoxTooltipOnPress(this)
                     onClicked: root.emphasisModel.setPartSelected(modelData.id, !checked)
                 }
             }
@@ -262,11 +277,10 @@ StyledPopupView {
                     var index = indexOfValue(root.emphasisModel.editingPartId)
                     return index >= 0 ? index : 0
                 }
-                toolTipTitle: qsTrc("playback", "Editing")
-                toolTipDescription: qsTrc("playback", "Clicks in highlight mode add or remove notes on this part only.")
                 navigation.panel: navPanel
                 navigation.order: 9
                 navigation.name: "EditingPartDropdown"
+                navigation.accessible.description: qsTrc("playback", "Clicks in highlight mode add or remove notes on this part only.")
                 onActivated: function(index, value) {
                     root.emphasisModel.editingPartId = value
                 }
@@ -339,11 +353,10 @@ StyledPopupView {
                             var index = indexOfValue(root.emphasisModel.editingPartParentId)
                             return index >= 0 ? index : 0
                         }
-                        toolTipTitle: qsTrc("playback", "Parent")
-                        toolTipDescription: qsTrc("playback", "Notes this part inherits before its own added and removed clicks.")
                         navigation.panel: navPanel
                         navigation.order: 13
                         navigation.name: "ParentPartDropdown"
+                        navigation.accessible.description: qsTrc("playback", "Notes this part inherits before its own added and removed clicks.")
                         onActivated: function(index, value) {
                             root.emphasisModel.applyEditingPartParentId(customPartEditors.modelData, value)
                         }
