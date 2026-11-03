@@ -54,6 +54,7 @@ class PracticeEmphasisPanelModel : public QObject, public muse::Contextable, pub
     Q_PROPERTY(QString editingPartName READ editingPartName NOTIFY stateChanged)
     Q_PROPERTY(bool editingPartBuiltin READ editingPartBuiltin NOTIFY stateChanged)
     Q_PROPERTY(QString editingPartParentId READ editingPartParentId NOTIFY stateChanged)
+    Q_PROPERTY(int editingPartParentIndex READ editingPartParentIndex NOTIFY stateChanged)
     Q_PROPERTY(bool solo READ solo WRITE setSolo NOTIFY stateChanged)
     Q_PROPERTY(QVariantList parentOptions READ parentOptions NOTIFY stateChanged)
     Q_PROPERTY(bool canDeleteEditingPart READ canDeleteEditingPart NOTIFY stateChanged)
@@ -63,6 +64,7 @@ class PracticeEmphasisPanelModel : public QObject, public muse::Contextable, pub
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY stateChanged)
     Q_PROPERTY(QVariantList copySourceOptions READ copySourceOptions NOTIFY stateChanged)
     Q_PROPERTY(QString copySourceId READ copySourceId WRITE setCopySourceId NOTIFY stateChanged)
+    Q_PROPERTY(int copySourceIndex READ copySourceIndex NOTIFY stateChanged)
     Q_PROPERTY(bool canCopyFromPart READ canCopyFromPart NOTIFY stateChanged)
 
     QML_ELEMENT
@@ -100,6 +102,7 @@ public:
     QString editingPartName() const;
     bool editingPartBuiltin() const;
     QString editingPartParentId() const;
+    int editingPartParentIndex() const;
     bool solo() const;
     QVariantList parentOptions() const;
     bool canDeleteEditingPart() const;
@@ -109,6 +112,7 @@ public:
     bool canRedo() const;
     QVariantList copySourceOptions() const;
     QString copySourceId() const;
+    int copySourceIndex() const;
     bool canCopyFromPart() const;
 
     void setPlaybackActive(bool active);
@@ -131,6 +135,7 @@ private:
     void refresh();
 
     QString resolvedCopySourceId() const;
+    int indexOfOptionValue(const QVariantList& options, const QString& value) const;
 
     bool m_loaded = false;
     QString m_copySourceId;

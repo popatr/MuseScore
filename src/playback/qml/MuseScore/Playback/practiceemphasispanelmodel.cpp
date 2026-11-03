@@ -334,6 +334,22 @@ QString PracticeEmphasisPanelModel::editingPartParentId() const
     return {};
 }
 
+int PracticeEmphasisPanelModel::indexOfOptionValue(const QVariantList& options, const QString& value) const
+{
+    for (int i = 0; i < options.size(); ++i) {
+        const QVariantMap item = options.at(i).toMap();
+        if (item.value(QStringLiteral("value")).toString() == value) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+int PracticeEmphasisPanelModel::editingPartParentIndex() const
+{
+    return indexOfOptionValue(parentOptions(), editingPartParentId());
+}
+
 bool PracticeEmphasisPanelModel::solo() const
 {
     const PracticeEmphasisData* emphasis = data();
@@ -528,6 +544,11 @@ void PracticeEmphasisPanelModel::redo()
 QString PracticeEmphasisPanelModel::copySourceId() const
 {
     return resolvedCopySourceId();
+}
+
+int PracticeEmphasisPanelModel::copySourceIndex() const
+{
+    return indexOfOptionValue(copySourceOptions(), resolvedCopySourceId());
 }
 
 void PracticeEmphasisPanelModel::setCopySourceId(const QString& sourceId)

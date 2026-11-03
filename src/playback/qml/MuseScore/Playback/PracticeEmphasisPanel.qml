@@ -45,7 +45,7 @@ Item {
         id: navPanel
         name: "PracticeEmphasisPanel"
         section: root.navigationSection
-        order: root.contentNavigationPanelOrderStart
+        order: root.contentNavigationPanelOrderStart + 1
         direction: NavigationPanel.Vertical
         accessible.name: qsTrc("playback", "Practice emphasis")
     }
@@ -64,6 +64,8 @@ Item {
             id: content
             width: flickable.width
             emphasisModel: emphasisModel
+            navigationSection: root.navigationSection
+            tabNavigationOrder: root.contentNavigationPanelOrderStart
             navigationPanel: navPanel
             showTitle: false
         }

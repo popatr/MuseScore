@@ -55,6 +55,8 @@ public:
         Lower
     };
 
+    // EditedAdded uses the same note color as Edited. NotationPainting draws a
+    // screen-only highlighter behind those noteheads when highlight mode is on.
     enum class Highlight {
         None,
         Edited,
