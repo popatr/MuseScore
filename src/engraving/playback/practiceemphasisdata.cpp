@@ -689,7 +689,7 @@ std::vector<std::string> PracticeEmphasisData::parentOptionIds(const Score* scor
 }
 
 int PracticeEmphasisData::parentOptionIndex(const Score* score, const std::string& childId,
-                                           const std::string& parentId) const
+                                            const std::string& parentId) const
 {
     const std::vector<std::string> ids = parentOptionIds(score, childId);
     for (size_t i = 0; i < ids.size(); ++i) {

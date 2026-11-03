@@ -121,8 +121,7 @@ public:
     //! Parent dropdown values: empty string first ("(none)"), then every visible part
     //! that would not create a parent cycle. Index 0 is always none.
     std::vector<std::string> parentOptionIds(const Score* score, const std::string& childId) const;
-    int parentOptionIndex(const Score* score, const std::string& childId,
-                          const std::string& parentId) const;
+    int parentOptionIndex(const Score* score, const std::string& childId, const std::string& parentId) const;
 
     bool canUndo() const;
     bool canRedo() const;

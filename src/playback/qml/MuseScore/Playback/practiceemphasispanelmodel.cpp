@@ -132,7 +132,6 @@ QString partCheckboxTooltip(const PracticeEmphasisData::PartRule& part)
     }
     return dropdownLabel(part);
 }
-
 }
 
 PracticeEmphasisPanelModel::PracticeEmphasisPanelModel(QObject* parent)
