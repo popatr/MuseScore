@@ -24,8 +24,8 @@
 #include <gmock/gmock.h>
 
 #include <algorithm>
-#include <cstdlib>
-#include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "mpe/events.h"
@@ -117,47 +117,6 @@ double curveOut(const DynamicAutomationLayers& layers, layer_idx_t key)
     }
     return it->second.begin()->second.outValue;
 }
-
-class OverrideGuard
-{
-public:
-    explicit OverrideGuard(const PracticeEmphasis::Config& config)
-    {
-        PracticeEmphasis::setOverrideForTesting(config);
-    }
-
-    ~OverrideGuard()
-    {
-        PracticeEmphasis::clearOverrideForTesting();
-    }
-};
-
-class ScoreEmphasisGuard
-{
-public:
-    ScoreEmphasisGuard()
-    {
-        if (const char* value = std::getenv("MUSESCORE_PRACTICE_EMPHASIS")) {
-            m_previous = value;
-        }
-        ::unsetenv("MUSESCORE_PRACTICE_EMPHASIS");
-        PracticeEmphasis::clearOverrideForTesting();
-        PracticeEmphasis::clearEnvironmentCacheForTesting();
-    }
-
-    ~ScoreEmphasisGuard()
-    {
-        if (m_previous) {
-            ::setenv("MUSESCORE_PRACTICE_EMPHASIS", m_previous->c_str(), 1);
-        } else {
-            ::unsetenv("MUSESCORE_PRACTICE_EMPHASIS");
-        }
-        PracticeEmphasis::clearOverrideForTesting();
-        PracticeEmphasis::clearEnvironmentCacheForTesting();
-    }
-
-    std::optional<std::string> m_previous;
-};
 
 Note* findPitch(Score* score, int pitch)
 {
@@ -259,11 +218,6 @@ protected:
         ON_CALL(*m_repositoryMock, defaultProfile(_)).WillByDefault(Return(m_defaultProfile));
     }
 
-    void TearDown() override
-    {
-        PracticeEmphasis::clearOverrideForTesting();
-    }
-
     PlaybackData loadPart(MasterScore* score, size_t partIndex)
     {
         const Part* part = score->parts().at(partIndex);
@@ -289,7 +243,7 @@ TEST(Engraving_PracticeEmphasis, DynamicStepMatchesSixDecibels)
               dynamicLevelFromType(muse::mpe::DynamicType::ppppppppp));
 }
 
-TEST_F(Engraving_PracticeEmphasisTests, VoiceGainScalesOneVoiceAndLeavesTheChordAlone)
+TEST_F(Engraving_PracticeEmphasisTests, AltoVoiceIsLoudOnTheCompanionLayer)
 {
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
@@ -304,13 +258,14 @@ TEST_F(Engraving_PracticeEmphasisTests, VoiceGainScalesOneVoiceAndLeavesTheChord
     ASSERT_TRUE(alto);
     const dynamic_level_t sopranoWritten = soprano->level;
     const dynamic_level_t altoWritten = alto->level;
+    const dynamic_level_t loud = PracticeEmphasis::scaleDynamicLevel(altoWritten, PracticeEmphasisData::DEFAULT_EMPHASIZED_DB);
+    const dynamic_level_t quiet = PracticeEmphasis::scaleDynamicLevel(sopranoWritten, PracticeEmphasisData::DEFAULT_OTHER_DB);
+    const staff_layer_idx_t altoCompanion = static_cast<staff_layer_idx_t>(PracticeEmphasis::EMPHASIS_STAFF_OFFSET);
 
-    PracticeEmphasis::Config config;
-    config.mode = PracticeEmphasis::Mode::VoiceGain;
-    config.staffIndex = 0;
-    config.voiceIndex = 1;
-    config.voiceGainDb = 6.f;
-    OverrideGuard guard(config);
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPlaybackActive(true);
+    emphasis.setPartSelected(score, "A1", true);
+    emphasis.setPartSelected(score, "A2", true);
 
     PlaybackData after = loadPart(score, 0);
     const std::vector<HeardNote> heard = heardNotes(after);
@@ -321,25 +276,18 @@ TEST_F(Engraving_PracticeEmphasisTests, VoiceGainScalesOneVoiceAndLeavesTheChord
     ASSERT_TRUE(altoAfter);
     ASSERT_TRUE(altoSecond);
 
-    EXPECT_EQ(sopranoAfter->level, sopranoWritten);
+    EXPECT_EQ(sopranoAfter->level, quiet);
     EXPECT_EQ(sopranoAfter->staff, 0);
     EXPECT_EQ(sopranoAfter->voice, 0);
-    EXPECT_EQ(altoAfter->level, PracticeEmphasis::scaleDynamicLevel(altoWritten, 6.f));
+    EXPECT_EQ(altoAfter->level, loud);
     EXPECT_NE(altoAfter->level, altoWritten);
     EXPECT_EQ(altoSecond->level, altoAfter->level);
-    EXPECT_EQ(altoAfter->staff, 0);
+    EXPECT_EQ(altoAfter->staff, altoCompanion);
     EXPECT_EQ(altoAfter->voice, 1);
-    EXPECT_EQ(after.dynamics.find(makeLayerIdx(PracticeEmphasis::EMPHASIS_STAFF_OFFSET, 0)), after.dynamics.end());
+    EXPECT_NE(after.dynamics.find(makeLayerIdx(altoCompanion, 1)), after.dynamics.end());
+    EXPECT_GT(curveOut(after.dynamics, makeLayerIdx(altoCompanion, 1)), curveOut(after.dynamics, makeLayerIdx(0, 0)));
 
-    const layer_idx_t altoLayer = makeLayerIdx(0, 1);
-    if (before.dynamics.find(altoLayer) != before.dynamics.end()) {
-        const dynamic_level_t scaled = PracticeEmphasis::scaleDynamicLevel(
-            dynamicLevelFromNormalized(real_t(curveOut(before.dynamics, altoLayer))), 6.f);
-        EXPECT_NEAR(curveOut(after.dynamics, altoLayer),
-                    static_cast<double>(scaled) / static_cast<double>(MAX_DYNAMIC_LEVEL),
-                    0.0001);
-        EXPECT_NEAR(curveOut(after.dynamics, makeLayerIdx(0, 0)), curveOut(before.dynamics, makeLayerIdx(0, 0)), 0.0001);
-    }
+    delete score;
 }
 
 TEST_F(Engraving_PracticeEmphasisTests, DivisiSplitsTheChordAndKeepsTheSharedUnison)
@@ -356,26 +304,23 @@ TEST_F(Engraving_PracticeEmphasisTests, DivisiSplitsTheChordAndKeepsTheSharedUni
     ASSERT_TRUE(findMidi(menWrittenNotes, 60));
     const dynamic_level_t writtenLevel = findMidi(womenWrittenNotes, 76)->level;
     const dynamic_level_t tenorWritten = findMidi(menWrittenNotes, 60)->level;
-
-    auto run = [&](PracticeEmphasis::Part part) {
-        PracticeEmphasis::Config config;
-        config.mode = PracticeEmphasis::Mode::Divisi;
-        config.part = part;
-        config.staffIndex = 0;
-        config.voiceIndex = 0;
-        config.emphasizedDb = 6.f;
-        config.otherDb = -12.f;
-        OverrideGuard guard(config);
-        return std::pair<PlaybackData, PlaybackData> { loadPart(score, 0), loadPart(score, 1) };
-    };
-
     const dynamic_level_t loud = PracticeEmphasis::scaleDynamicLevel(writtenLevel, 6.f);
     const dynamic_level_t quiet = PracticeEmphasis::scaleDynamicLevel(writtenLevel, -12.f);
     const dynamic_level_t tenorQuiet = PracticeEmphasis::scaleDynamicLevel(tenorWritten, -12.f);
     const staff_layer_idx_t companion = static_cast<staff_layer_idx_t>(PracticeEmphasis::EMPHASIS_STAFF_OFFSET);
 
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPlaybackActive(true);
+    emphasis.setGains(6.f, -12.f);
+
+    auto run = [&](const char* partId) {
+        emphasis.setPartSelected(score, "S1", std::string(partId) == "S1");
+        emphasis.setPartSelected(score, "S2", std::string(partId) == "S2");
+        return std::pair<PlaybackData, PlaybackData> { loadPart(score, 0), loadPart(score, 1) };
+    };
+
     {
-        auto [women, men] = run(PracticeEmphasis::Part::S1);
+        auto [women, men] = run("S1");
         const std::vector<HeardNote> notes = heardNotes(women);
         const HeardNote* e5 = findMidi(notes, 76);
         const HeardNote* c5 = findMidi(notes, 72);
@@ -413,7 +358,7 @@ TEST_F(Engraving_PracticeEmphasisTests, DivisiSplitsTheChordAndKeepsTheSharedUni
     }
 
     {
-        auto [women, men] = run(PracticeEmphasis::Part::S2);
+        auto [women, men] = run("S2");
         const std::vector<HeardNote> notes = heardNotes(women);
         const HeardNote* e5 = findMidi(notes, 76);
         const HeardNote* c5 = findMidi(notes, 72);
@@ -435,6 +380,8 @@ TEST_F(Engraving_PracticeEmphasisTests, DivisiSplitsTheChordAndKeepsTheSharedUni
         EXPECT_EQ(findMidi(menNotes, 43)->level, tenorQuiet);
         EXPECT_GT(curveOut(women.dynamics, makeLayerIdx(companion, 0)), curveOut(women.dynamics, makeLayerIdx(0, 0)));
     }
+
+    delete score;
 }
 
 TEST(Engraving_PracticeEmphasis, PartTemplatesMapChoirToStaffAndVoice)
@@ -481,9 +428,6 @@ TEST(Engraving_PracticeEmphasis, PartTemplatesMapChoirToStaffAndVoice)
 
 TEST_F(Engraving_PracticeEmphasisTests, UnionKeepsASharedNoteUntilEveryPartIsCleared)
 {
-    ScoreEmphasisGuard environment;
-    ASSERT_EQ(PracticeEmphasis::current().mode, PracticeEmphasis::Mode::Off);
-
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
     score->initAutomation();
@@ -560,7 +504,6 @@ TEST_F(Engraving_PracticeEmphasisTests, UnionKeepsASharedNoteUntilEveryPartIsCle
 
 TEST_F(Engraving_PracticeEmphasisTests, EditsAndRangeChangeWhoIsLoud)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
     score->initAutomation();
@@ -644,7 +587,6 @@ TEST_F(Engraving_PracticeEmphasisTests, EditsAndRangeChangeWhoIsLoud)
 
 TEST(Engraving_PracticeEmphasis, ThreeNoteChordSplitsTopFromTheRestAndAUnisonIsShared)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = compat::ScoreAccess::createMasterScore(nullptr);
     ASSERT_TRUE(score);
 
@@ -720,7 +662,6 @@ TEST(Engraving_PracticeEmphasis, ThreeNoteChordSplitsTopFromTheRestAndAUnisonIsS
 
 TEST_F(Engraving_PracticeEmphasisTests, SidecarRoundTripsInsideTheScoreAndLeavesNotationAlone)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
     score->initAutomation();
@@ -827,7 +768,6 @@ TEST_F(Engraving_PracticeEmphasisTests, SidecarRoundTripsInsideTheScoreAndLeaves
 
 TEST_F(Engraving_PracticeEmphasisTests, ChildInheritsParentNotesAndKeepsItsOwnRemovals)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
 
@@ -869,7 +809,6 @@ TEST_F(Engraving_PracticeEmphasisTests, ChildInheritsParentNotesAndKeepsItsOwnRe
 
 TEST_F(Engraving_PracticeEmphasisTests, PerPartEditsDoNotLeakAndUnionIsAcrossCheckedParts)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
 
@@ -923,7 +862,6 @@ TEST_F(Engraving_PracticeEmphasisTests, PerPartEditsDoNotLeakAndUnionIsAcrossChe
 
 TEST_F(Engraving_PracticeEmphasisTests, ClickSwitchesEditingPartByStaffAndManualPartsStayPut)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
 
@@ -966,7 +904,6 @@ TEST_F(Engraving_PracticeEmphasisTests, ClickSwitchesEditingPartByStaffAndManual
 
 TEST_F(Engraving_PracticeEmphasisTests, CustomPartNameAndParentSurviveEditingSwitch)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
 
@@ -1016,7 +953,6 @@ TEST_F(Engraving_PracticeEmphasisTests, CustomPartNameAndParentSurviveEditingSwi
 
 TEST_F(Engraving_PracticeEmphasisTests, SoloUsesOnlyEditingPartWithoutChangingChecks)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
 
@@ -1061,7 +997,6 @@ TEST_F(Engraving_PracticeEmphasisTests, SoloUsesOnlyEditingPartWithoutChangingCh
 
 TEST_F(Engraving_PracticeEmphasisTests, SoloMutesNonEditingNotesDuringPlayback)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
     score->initAutomation();
@@ -1125,7 +1060,6 @@ TEST_F(Engraving_PracticeEmphasisTests, SoloMutesNonEditingNotesDuringPlayback)
 
 TEST_F(Engraving_PracticeEmphasisTests, AddedNotesHighlightAsEditedAdded)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
 
@@ -1161,7 +1095,6 @@ TEST_F(Engraving_PracticeEmphasisTests, AddedNotesHighlightAsEditedAdded)
 
 TEST_F(Engraving_PracticeEmphasisTests, SidecarRoundTripsSoloAndOlderFilesDefaultOff)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
 
@@ -1232,7 +1165,6 @@ TEST(Engraving_PracticeEmphasis, VersionOneOverridesAreIgnored)
 
 TEST_F(Engraving_PracticeEmphasisTests, UndoRedoClicksResetAndDropsRedoTail)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
 
@@ -1322,7 +1254,6 @@ TEST_F(Engraving_PracticeEmphasisTests, UndoRedoClicksResetAndDropsRedoTail)
 
 TEST_F(Engraving_PracticeEmphasisTests, NameAndParentReloadAndParentDropdownIndex)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
 
@@ -1450,7 +1381,6 @@ TEST_F(Engraving_PracticeEmphasisTests, SidecarJsonLoadsCustomNameAndParentKeys)
 
 TEST_F(Engraving_PracticeEmphasisTests, UndoParentKeepsNameAndSettings)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
 
@@ -1496,7 +1426,6 @@ TEST_F(Engraving_PracticeEmphasisTests, UndoParentKeepsNameAndSettings)
 
 TEST_F(Engraving_PracticeEmphasisTests, CopyFromPartIsOneUndoableStep)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
 
@@ -1547,7 +1476,6 @@ TEST_F(Engraving_PracticeEmphasisTests, CopyFromPartIsOneUndoableStep)
 
 TEST_F(Engraving_PracticeEmphasisTests, EmphasisUndoIsIndependentOfScoreUndo)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
     ASSERT_TRUE(score->undoStack());
@@ -1589,7 +1517,6 @@ TEST_F(Engraving_PracticeEmphasisTests, EmphasisUndoIsIndependentOfScoreUndo)
 
 TEST_F(Engraving_PracticeEmphasisTests, MissingNoteEditsStayDormantUntilSameEidReturns)
 {
-    ScoreEmphasisGuard environment;
     MasterScore* score = ScoreRW::readScore(SCORE_FILE);
     ASSERT_TRUE(score);
 
