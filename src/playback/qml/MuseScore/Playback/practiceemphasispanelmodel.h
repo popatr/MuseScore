@@ -33,6 +33,7 @@
 
 namespace mu::engraving {
 class MasterScore;
+class MeasureBase;
 class PracticeEmphasisData;
 }
 
@@ -59,7 +60,6 @@ class PracticeEmphasisPanelModel : public QObject, public muse::Contextable, pub
     Q_PROPERTY(bool solo READ solo WRITE setSolo NOTIFY stateChanged)
     Q_PROPERTY(QVariantList parentOptions READ parentOptions NOTIFY stateChanged)
     Q_PROPERTY(bool canDeleteEditingPart READ canDeleteEditingPart NOTIFY stateChanged)
-    Q_PROPERTY(bool debugOverrideActive READ debugOverrideActive NOTIFY stateChanged)
     Q_PROPERTY(QString selectionButtonText READ selectionButtonText NOTIFY stateChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY stateChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY stateChanged)
@@ -110,7 +110,6 @@ public:
     bool solo() const;
     QVariantList parentOptions() const;
     bool canDeleteEditingPart() const;
-    bool debugOverrideActive() const;
     QString selectionButtonText() const;
     bool canUndo() const;
     bool canRedo() const;
@@ -129,6 +128,10 @@ public:
     void setSolo(bool enabled);
     void setCopySourceId(const QString& sourceId);
 
+    //! Unit tests attach a MasterScore without a QML/IoC stack. Unused in the app.
+    void attachScoreForTesting(engraving::MasterScore* score);
+    void setSelectionMeasuresForTesting(engraving::MeasureBase* from, engraving::MeasureBase* to);
+
 signals:
     void stateChanged();
     void editingPartChanged();
@@ -144,5 +147,8 @@ private:
 
     bool m_loaded = false;
     QString m_copySourceId;
+    engraving::MasterScore* m_testScore = nullptr;
+    engraving::MeasureBase* m_testSelectionFrom = nullptr;
+    engraving::MeasureBase* m_testSelectionTo = nullptr;
 };
 }

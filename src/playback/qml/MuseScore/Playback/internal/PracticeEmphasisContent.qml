@@ -134,14 +134,6 @@ Item {
             font: ui.theme.bodyBoldFont
         }
 
-        StyledTextLabel {
-            Layout.fillWidth: true
-            visible: root.emphasisModel.debugOverrideActive
-            wrapMode: Text.WordWrap
-            horizontalAlignment: Text.AlignLeft
-            text: qsTrc("playback", "MUSESCORE_PRACTICE_EMPHASIS is set, so it overrides this score until you quit and unset it.")
-        }
-
         StyledTabBar {
             id: tabBar
 

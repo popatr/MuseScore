@@ -32,7 +32,6 @@
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/measurebase.h"
-#include "engraving/playback/practiceemphasis.h"
 #include "engraving/playback/practiceemphasisdata.h"
 
 #include "notation/inotation.h"
@@ -157,8 +156,25 @@ void PracticeEmphasisPanelModel::load()
     refresh();
 }
 
+void PracticeEmphasisPanelModel::attachScoreForTesting(MasterScore* score)
+{
+    m_testScore = score;
+    connectScore();
+    refresh();
+}
+
+void PracticeEmphasisPanelModel::setSelectionMeasuresForTesting(MeasureBase* from, MeasureBase* to)
+{
+    m_testSelectionFrom = from;
+    m_testSelectionTo = to;
+    refresh();
+}
+
 MasterScore* PracticeEmphasisPanelModel::currentMaster() const
 {
+    if (m_testScore) {
+        return m_testScore;
+    }
     if (!globalContext()) {
         return nullptr;
     }
@@ -418,13 +434,25 @@ bool PracticeEmphasisPanelModel::canDeleteEditingPart() const
     return hasScore() && !editingPartBuiltin() && !editingPartId().isEmpty();
 }
 
-bool PracticeEmphasisPanelModel::debugOverrideActive() const
-{
-    return PracticeEmphasis::debugOverrideActive();
-}
-
 QString PracticeEmphasisPanelModel::selectionButtonText() const
 {
+    auto labelForRange = [](int from, int to) {
+        if (from <= 0) {
+            return muse::qtrc("playback", "From Selection");
+        }
+        if (to <= 0) {
+            to = from;
+        }
+        if (from == to) {
+            return muse::qtrc("playback", "From Selection (%1)").arg(from);
+        }
+        return muse::qtrc("playback", "From Selection (%1–%2)").arg(from).arg(to);
+    };
+
+    if (m_testScore) {
+        return labelForRange(displayedMeasureNumber(m_testSelectionFrom), displayedMeasureNumber(m_testSelectionTo));
+    }
+
     if (!globalContext() || !globalContext()->currentNotation() || !globalContext()->currentNotation()->interaction()) {
         return muse::qtrc("playback", "From Selection");
     }
@@ -432,18 +460,8 @@ QString PracticeEmphasisPanelModel::selectionButtonText() const
     if (!selection) {
         return muse::qtrc("playback", "From Selection");
     }
-    const int from = displayedMeasureNumber(selection->startMeasureBase());
-    int to = displayedMeasureNumber(selection->endMeasureBase());
-    if (from <= 0) {
-        return muse::qtrc("playback", "From Selection");
-    }
-    if (to <= 0) {
-        to = from;
-    }
-    if (from == to) {
-        return muse::qtrc("playback", "From Selection (%1)").arg(from);
-    }
-    return muse::qtrc("playback", "From Selection (%1–%2)").arg(from).arg(to);
+    return labelForRange(displayedMeasureNumber(selection->startMeasureBase()),
+                         displayedMeasureNumber(selection->endMeasureBase()));
 }
 
 void PracticeEmphasisPanelModel::setPlaybackActive(bool active)
@@ -682,6 +700,23 @@ void PracticeEmphasisPanelModel::applyEditingPartParentId(const QString& partId,
 
 void PracticeEmphasisPanelModel::useSelectionRange()
 {
+    auto applyRange = [this](int from, int to) {
+        if (from <= 0) {
+            return;
+        }
+        if (to <= 0) {
+            to = from;
+        }
+        if (PracticeEmphasisData* emphasis = data()) {
+            emphasis->setRange(from, to);
+        }
+    };
+
+    if (m_testScore) {
+        applyRange(displayedMeasureNumber(m_testSelectionFrom), displayedMeasureNumber(m_testSelectionTo));
+        return;
+    }
+
     if (!globalContext() || !globalContext()->currentNotation()) {
         return;
     }
@@ -689,18 +724,8 @@ void PracticeEmphasisPanelModel::useSelectionRange()
     if (!selection) {
         return;
     }
-    const int from = displayedMeasureNumber(selection->startMeasureBase());
-    int to = displayedMeasureNumber(selection->endMeasureBase());
-    if (from <= 0) {
-        return;
-    }
-    if (to <= 0) {
-        to = from;
-    }
-    PracticeEmphasisData* emphasis = data();
-    if (emphasis) {
-        emphasis->setRange(from, to);
-    }
+    applyRange(displayedMeasureNumber(selection->startMeasureBase()),
+               displayedMeasureNumber(selection->endMeasureBase()));
 }
 
 void PracticeEmphasisPanelModel::clearMeasureRange()
