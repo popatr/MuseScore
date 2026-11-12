@@ -29,7 +29,7 @@
 #include "modularity/ioc.h"
 #include "rcommand/icommanddispatcher.h"
 
-#include "context/iglobalcontext.h"
+#include "project/iprojectsession.h"
 
 namespace mu::engraving {
 class MasterScore;
@@ -70,7 +70,7 @@ class PracticeEmphasisPanelModel : public QObject, public muse::Contextable, pub
 
     QML_ELEMENT
 
-    muse::ContextInject<context::IGlobalContext> globalContext = { this };
+    muse::ContextInject<project::IProjectSession> projectSession = { this };
     muse::ContextInject<muse::rcommand::ICommandDispatcher> commandDispatcher = { this };
 
 public:

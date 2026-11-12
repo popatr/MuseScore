@@ -146,8 +146,8 @@ void PracticeEmphasisPanelModel::load()
         return;
     }
     m_loaded = true;
-    if (globalContext()) {
-        globalContext()->currentNotationChanged().onNotify(this, [this]() {
+    if (projectSession()) {
+        projectSession()->currentNotationChanged().onNotify(this, [this]() {
             connectScore();
             refresh();
         });
@@ -175,10 +175,10 @@ MasterScore* PracticeEmphasisPanelModel::currentMaster() const
     if (m_testScore) {
         return m_testScore;
     }
-    if (!globalContext()) {
+    if (!projectSession()) {
         return nullptr;
     }
-    const INotationPtr notation = globalContext()->currentNotation();
+    const INotationPtr notation = projectSession()->currentNotation();
     if (!notation || !notation->elements()) {
         return nullptr;
     }
@@ -202,10 +202,10 @@ void PracticeEmphasisPanelModel::connectScore()
         }, muse::async::Asyncable::Mode::SetReplace);
     }
 
-    if (!globalContext() || !globalContext()->currentNotation() || !globalContext()->currentNotation()->interaction()) {
+    if (!projectSession() || !projectSession()->currentNotation() || !projectSession()->currentNotation()->interaction()) {
         return;
     }
-    globalContext()->currentNotation()->interaction()->selectionChanged().onNotify(this, [this]() {
+    projectSession()->currentNotation()->interaction()->selectionChanged().onNotify(this, [this]() {
         refresh();
     }, muse::async::Asyncable::Mode::SetReplace);
 }
@@ -453,10 +453,10 @@ QString PracticeEmphasisPanelModel::selectionButtonText() const
         return labelForRange(displayedMeasureNumber(m_testSelectionFrom), displayedMeasureNumber(m_testSelectionTo));
     }
 
-    if (!globalContext() || !globalContext()->currentNotation() || !globalContext()->currentNotation()->interaction()) {
+    if (!projectSession() || !projectSession()->currentNotation() || !projectSession()->currentNotation()->interaction()) {
         return muse::qtrc("playback", "From Selection");
     }
-    const INotationSelectionPtr selection = globalContext()->currentNotation()->interaction()->selection();
+    const INotationSelectionPtr selection = projectSession()->currentNotation()->interaction()->selection();
     if (!selection) {
         return muse::qtrc("playback", "From Selection");
     }
@@ -717,10 +717,10 @@ void PracticeEmphasisPanelModel::useSelectionRange()
         return;
     }
 
-    if (!globalContext() || !globalContext()->currentNotation()) {
+    if (!projectSession() || !projectSession()->currentNotation()) {
         return;
     }
-    const INotationSelectionPtr selection = globalContext()->currentNotation()->interaction()->selection();
+    const INotationSelectionPtr selection = projectSession()->currentNotation()->interaction()->selection();
     if (!selection) {
         return;
     }
