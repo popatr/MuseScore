@@ -94,7 +94,7 @@ DynamicAutomationMap constantCurve(dynamic_level_t level)
 bool partOwnsStaff(const DynamicAutomationLayers& layers, int staffIndex)
 {
     for (auto it = layers.cbegin(); it != layers.cend(); ++it) {
-        if (static_cast<int>(it->first / MAX_VOICES) == staffIndex) {
+        if (static_cast<int>(it->first / muse::mpe::MAX_VOICES) == staffIndex) {
             return true;
         }
     }
@@ -187,7 +187,7 @@ void PracticeEmphasis::applyToDynamics(const Score* score, DynamicAutomationLaye
     }
 
     for (auto it = layers.begin(); it != layers.end(); ++it) {
-        if (static_cast<int>(it->first / MAX_VOICES) >= EMPHASIS_STAFF_OFFSET) {
+        if (static_cast<int>(it->first / muse::mpe::MAX_VOICES) >= EMPHASIS_STAFF_OFFSET) {
             continue;
         }
         if (data.document().solo) {
