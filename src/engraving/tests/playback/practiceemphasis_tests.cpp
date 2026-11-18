@@ -42,7 +42,9 @@
 #include "engraving/dom/measure.h"
 #include "engraving/dom/note.h"
 #include "engraving/dom/part.h"
+#include "engraving/dom/score.h"
 #include "engraving/dom/segment.h"
+#include "engraving/dom/staff.h"
 #include "engraving/editing/transaction/undostack.h"
 #include "engraving/types/types.h"
 #include "global/types/translatablestring.h"
@@ -1451,6 +1453,63 @@ TEST_F(Engraving_PracticeEmphasisTests, UndoParentKeepsNameAndSettings)
     EXPECT_EQ(custom->parentId, "A1");
     EXPECT_EQ(custom->name, "renamed");
     EXPECT_TRUE(emphasis.document().solo);
+
+    delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, UndoBuiltinParentFollowsStaffReorder)
+{
+    MasterScore* score = ScoreRW::readScore(SCORE_FILE);
+    ASSERT_TRUE(score);
+    ASSERT_TRUE(score->undoStack());
+
+    Note* alto = findPitch(score, 67);
+    ASSERT_TRUE(alto);
+    Staff* women = score->staff(0);
+    ASSERT_TRUE(women);
+    EXPECT_EQ(static_cast<int>(alto->staffIdx()), 0);
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    const std::string customId = emphasis.addCustomPart(score, "altos", {});
+    ASSERT_FALSE(customId.empty());
+    EXPECT_EQ(findPart(emphasis.document().parts, "A1"), nullptr);
+    EXPECT_FALSE(emphasis.partContains(alto, customId));
+
+    emphasis.setPartParent(score, customId, "A1");
+    const PracticeEmphasisData::PartRule* custom = findPart(emphasis.document().parts, customId);
+    const PracticeEmphasisData::PartRule* a1 = findPart(emphasis.document().parts, "A1");
+    ASSERT_TRUE(custom);
+    ASSERT_TRUE(a1);
+    EXPECT_EQ(custom->parentId, "A1");
+    EXPECT_FALSE(a1->staffEid.empty());
+    EXPECT_TRUE(emphasis.partContains(alto, customId));
+
+    std::vector<staff_idx_t> swapped { 1, 0 };
+    score->sortStaves(swapped);
+    EXPECT_EQ(static_cast<int>(alto->staffIdx()), 1);
+    EXPECT_EQ(static_cast<int>(women->idx()), 1);
+    EXPECT_TRUE(emphasis.partContains(alto, customId));
+    a1 = findPart(emphasis.document().parts, "A1");
+    ASSERT_TRUE(a1);
+    EXPECT_FALSE(a1->staffEid.empty());
+
+    score->undoRedo(true, nullptr);
+    custom = findPart(emphasis.document().parts, customId);
+    ASSERT_TRUE(custom);
+    EXPECT_TRUE(custom->parentId.empty());
+    EXPECT_EQ(findPart(emphasis.document().parts, "A1"), nullptr);
+    EXPECT_FALSE(emphasis.partContains(alto, customId));
+    EXPECT_EQ(static_cast<int>(alto->staffIdx()), 1);
+
+    score->undoRedo(false, nullptr);
+    custom = findPart(emphasis.document().parts, customId);
+    a1 = findPart(emphasis.document().parts, "A1");
+    ASSERT_TRUE(custom);
+    ASSERT_TRUE(a1);
+    EXPECT_EQ(custom->parentId, "A1");
+    EXPECT_FALSE(a1->staffEid.empty());
+    EXPECT_TRUE(emphasis.partContains(alto, customId));
+    EXPECT_EQ(static_cast<int>(alto->staffIdx()), 1);
 
     delete score;
 }

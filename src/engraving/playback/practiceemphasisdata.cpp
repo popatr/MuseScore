@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <functional>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "global/serialization/json.h"
 
@@ -1171,24 +1172,32 @@ void PracticeEmphasisData::projectNonUndoableFields(Document& snap) const
     snap.editingPartId = m_document.editingPartId;
 
     std::vector<PartRule> next;
-    next.reserve(m_document.parts.size());
+    next.reserve(m_document.parts.size() + snap.parts.size());
+    std::unordered_set<std::string> seen;
     for (const PartRule& live : m_document.parts) {
+        if (live.builtin && !findRuleById(snap.parts, live.id)) {
+            // ensurePart during the undone command must not leave this builtin.
+            continue;
+        }
         PartRule part = live;
         if (const PartRule* old = findRuleById(snap.parts, live.id)) {
             part.parentId = old->parentId;
             part.added = old->added;
             part.removed = old->removed;
-        } else if (part.builtin) {
-            // ensurePart during this command must not keep the new membership
-            // when the snapshot predates that part.
-            part.added.clear();
-            part.removed.clear();
         }
         if (!part.parentId.empty() && !isBuiltinPartId(part.parentId)
             && !findRuleById(m_document.parts, part.parentId)) {
             part.parentId.clear();
         }
+        seen.insert(part.id);
         next.push_back(std::move(part));
+    }
+    for (const PartRule& old : snap.parts) {
+        if (!old.builtin || !seen.insert(old.id).second) {
+            continue;
+        }
+        // Builtin materialized by the command being applied or redone.
+        next.push_back(old);
     }
     snap.parts = std::move(next);
 }
