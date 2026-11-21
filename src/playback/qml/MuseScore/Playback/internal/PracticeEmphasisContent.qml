@@ -451,6 +451,19 @@ Item {
                 onClicked: root.emphasisModel.solo = !checked
             }
 
+            CheckBox {
+                text: qsTrc("playback", "Only attenuate measures that contain emphasized notes")
+                checked: root.emphasisModel.onlyAttenuateEmphasizedMeasures
+                enabled: root.emphasisModel.hasScore
+                navigation.panel: root.navigationPanel
+                navigation.order: root.navigationOrderStart + 3
+                navigation.accessible.description: qsTrc("playback", "Measures with no emphasized note play at written balance. Measures that contain at least one emphasized note still boost those notes and attenuate the rest. Solo mutes other notes only in those measures.")
+                onHoveredChanged: root.showCheckBoxTooltip(this, qsTrc("playback", "Only attenuate measures that contain emphasized notes"),
+                                                           navigation.accessible.description)
+                onPressedChanged: root.hideCheckBoxTooltipOnPress(this)
+                onClicked: root.emphasisModel.onlyAttenuateEmphasizedMeasures = !checked
+            }
+
             GridLayout {
                 Layout.fillWidth: true
                 columns: root.narrow ? 2 : 4
@@ -471,7 +484,7 @@ Item {
                     measureUnitsSymbol: qsTrc("playback", "dB")
                     enabled: root.emphasisModel.hasScore
                     navigation.panel: root.navigationPanel
-                    navigation.order: root.navigationOrderStart + 3
+                    navigation.order: root.navigationOrderStart + 4
                     navigation.accessible.description: qsTrc("playback", "Gain in decibels for notes that belong to a checked part.")
                     onValueEdited: function(newValue) {
                         root.emphasisModel.emphasizedDb = newValue
@@ -492,7 +505,7 @@ Item {
                     measureUnitsSymbol: qsTrc("playback", "dB")
                     enabled: root.emphasisModel.hasScore
                     navigation.panel: root.navigationPanel
-                    navigation.order: root.navigationOrderStart + 4
+                    navigation.order: root.navigationOrderStart + 5
                     navigation.accessible.description: qsTrc("playback", "Gain in decibels for notes that do not belong to any checked part.")
                     onValueEdited: function(newValue) {
                         root.emphasisModel.otherDb = newValue
@@ -519,7 +532,7 @@ Item {
                     decimals: 0
                     enabled: root.emphasisModel.hasScore
                     navigation.panel: root.navigationPanel
-                    navigation.order: root.navigationOrderStart + 5
+                    navigation.order: root.navigationOrderStart + 6
                     navigation.accessible.description: qsTrc("playback", "First measure of the emphasis range. 0 is the whole score.")
                     onValueEdited: function(newValue) {
                         root.emphasisModel.fromMeasure = newValue
@@ -539,7 +552,7 @@ Item {
                     decimals: 0
                     enabled: root.emphasisModel.hasScore
                     navigation.panel: root.navigationPanel
-                    navigation.order: root.navigationOrderStart + 6
+                    navigation.order: root.navigationOrderStart + 7
                     navigation.accessible.description: qsTrc("playback", "Last measure of the emphasis range. 0 is the whole score.")
                     onValueEdited: function(newValue) {
                         root.emphasisModel.toMeasure = newValue
@@ -553,7 +566,7 @@ Item {
                     toolTipTitle: qsTrc("playback", "From Selection")
                     toolTipDescription: qsTrc("playback", "Set the measure range from the current score selection.")
                     navigation.panel: root.navigationPanel
-                    navigation.order: root.navigationOrderStart + 7
+                    navigation.order: root.navigationOrderStart + 8
                     onClicked: root.emphasisModel.useSelectionRange()
                 }
 
@@ -564,7 +577,7 @@ Item {
                     toolTipTitle: qsTrc("playback", "All")
                     toolTipDescription: qsTrc("playback", "Clear the measure range so emphasis uses the whole score.")
                     navigation.panel: root.navigationPanel
-                    navigation.order: root.navigationOrderStart + 8
+                    navigation.order: root.navigationOrderStart + 9
                     onClicked: root.emphasisModel.clearMeasureRange()
                 }
             }

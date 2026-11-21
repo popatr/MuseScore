@@ -401,6 +401,12 @@ bool PracticeEmphasisPanelModel::solo() const
     return emphasis && emphasis->document().solo;
 }
 
+bool PracticeEmphasisPanelModel::onlyAttenuateEmphasizedMeasures() const
+{
+    const PracticeEmphasisData* emphasis = data();
+    return emphasis && emphasis->document().onlyAttenuateEmphasizedMeasures;
+}
+
 QVariantList PracticeEmphasisPanelModel::parentOptions() const
 {
     QVariantList list;
@@ -562,6 +568,15 @@ void PracticeEmphasisPanelModel::setSolo(bool enabled)
         }
     }
     emphasis->setSolo(enabled);
+}
+
+void PracticeEmphasisPanelModel::setOnlyAttenuateEmphasizedMeasures(bool enabled)
+{
+    PracticeEmphasisData* emphasis = data();
+    if (!emphasis) {
+        return;
+    }
+    emphasis->setOnlyAttenuateEmphasizedMeasures(enabled);
 }
 
 void PracticeEmphasisPanelModel::togglePanel()

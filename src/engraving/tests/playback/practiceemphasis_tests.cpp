@@ -76,6 +76,7 @@ struct HeardNote {
     staff_layer_idx_t staff = 0;
     voice_layer_idx_t voice = 0;
     dynamic_level_t level = 0;
+    timestamp_t timestamp = 0;
 };
 
 int midiFromPitchLevel(pitch_level_t pitch)
@@ -97,6 +98,7 @@ std::vector<HeardNote> heardNotes(const PlaybackData& data)
             heard.staff = note.arrangementCtx().staffLayerIndex;
             heard.voice = note.arrangementCtx().voiceLayerIndex;
             heard.level = note.expressionCtx().nominalDynamicLevel;
+            heard.timestamp = note.arrangementCtx().actualTimestamp;
             notes.push_back(heard);
         }
     }
@@ -108,6 +110,48 @@ const HeardNote* findMidi(const std::vector<HeardNote>& notes, int midi)
     for (const HeardNote& note : notes) {
         if (note.midi == midi) {
             return &note;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<HeardNote> matchingMidiSorted(const std::vector<HeardNote>& notes, int midi)
+{
+    std::vector<HeardNote> match;
+    for (const HeardNote& note : notes) {
+        if (note.midi == midi) {
+            match.push_back(note);
+        }
+    }
+    std::sort(match.begin(), match.end(), [](const HeardNote& a, const HeardNote& b) {
+        return a.timestamp < b.timestamp;
+    });
+    return match;
+}
+
+int displayedMeasureNumber(const Measure* measure)
+{
+    return measure->measureNumber() + measure->measureNumberOffset() + 1;
+}
+
+Note* findPitchInMeasure(Score* score, int pitch, int measureNumber)
+{
+    for (Measure* measure = score->firstMeasure(); measure; measure = measure->nextMeasure()) {
+        if (displayedMeasureNumber(measure) != measureNumber) {
+            continue;
+        }
+        for (Segment* segment = measure->first(SegmentType::ChordRest); segment; segment = segment->next(SegmentType::ChordRest)) {
+            for (track_idx_t track = 0; track < score->ntracks(); ++track) {
+                EngravingItem* element = segment->element(track);
+                if (!element || !element->isChord()) {
+                    continue;
+                }
+                for (Note* note : toChord(element)->notes()) {
+                    if (note->pitch() == pitch) {
+                        return note;
+                    }
+                }
+            }
         }
     }
     return nullptr;
@@ -141,11 +185,6 @@ Note* findPitch(Score* score, int pitch)
         }
     }
     return nullptr;
-}
-
-int displayedMeasureNumber(const Measure* measure)
-{
-    return measure->measureNumber() + measure->measureNumberOffset() + 1;
 }
 
 const PracticeEmphasisData::PartRule* findPart(const std::vector<PracticeEmphasisData::PartRule>& parts, const std::string& id)
@@ -1203,7 +1242,7 @@ TEST(Engraving_PracticeEmphasis, NewerSidecarVersionIsPreservedUnread)
     PracticeEmphasisData parsed;
     const muse::ByteArray newer(
         "{"
-        "\"version\":4,"
+        "\"version\":5,"
         "\"playbackActive\":true,"
         "\"newField\":\"keep-me\","
         "\"parts\":[{\"id\":\"S1\",\"name\":\"1st soprano\",\"staffIndex\":0,\"voice\":0,\"role\":\"top\",\"selected\":true}]"
@@ -1717,4 +1756,113 @@ TEST_F(Engraving_PracticeEmphasisTests, MissingNoteEditsStayDormantUntilSameEidR
     EXPECT_TRUE(std::find(soprano->added.begin(), soprano->added.end(), altoEid) == soprano->added.end());
 
     delete score;
+}
+
+TEST_F(Engraving_PracticeEmphasisTests, SparseMeasuresLeaveEmptyBarsAtWrittenBalance)
+{
+    const String listenFile("playback/playbackmodel_data/practice_emphasis/ssatb-listen.mscx");
+    MasterScore* score = ScoreRW::readScore(listenFile);
+    ASSERT_TRUE(score);
+    score->initAutomation();
+
+    PlaybackData writtenWomen = loadPart(score, 0);
+    const std::vector<HeardNote> writtenE5 = matchingMidiSorted(heardNotes(writtenWomen), 76);
+    ASSERT_GE(writtenE5.size(), 2u);
+    const dynamic_level_t writtenLevel = writtenE5.front().level;
+    const dynamic_level_t loud = PracticeEmphasis::scaleDynamicLevel(writtenLevel, PracticeEmphasisData::DEFAULT_EMPHASIZED_DB);
+    const dynamic_level_t quiet = PracticeEmphasis::scaleDynamicLevel(writtenLevel, PracticeEmphasisData::DEFAULT_OTHER_DB);
+    const staff_layer_idx_t companion = PracticeEmphasis::EMPHASIS_STAFF_OFFSET;
+
+    PracticeEmphasisData& emphasis = score->practiceEmphasis();
+    emphasis.setPlaybackActive(true);
+    emphasis.setPartSelected(score, "S1", true);
+    emphasis.setRange(1, 1);
+    EXPECT_FALSE(emphasis.document().onlyAttenuateEmphasizedMeasures);
+
+    Note* measure1 = findPitchInMeasure(score, 76, 1);
+    Note* measure2 = findPitchInMeasure(score, 76, 2);
+    Note* measure1Lower = findPitchInMeasure(score, 72, 1);
+    ASSERT_TRUE(measure1);
+    ASSERT_TRUE(measure2);
+    ASSERT_TRUE(measure1Lower);
+    EXPECT_TRUE(emphasis.isEmphasized(measure1));
+    EXPECT_FALSE(emphasis.isEmphasized(measure2));
+    EXPECT_TRUE(emphasis.measureContainsEmphasizedNote(measure1->findMeasure()));
+    EXPECT_FALSE(emphasis.measureContainsEmphasizedNote(measure2->findMeasure()));
+    EXPECT_TRUE(emphasis.appliesPlaybackMixing(measure1));
+    EXPECT_TRUE(emphasis.appliesPlaybackMixing(measure2));
+
+    {
+        const std::vector<HeardNote> e5 = matchingMidiSorted(heardNotes(loadPart(score, 0)), 76);
+        ASSERT_GE(e5.size(), 2u);
+        EXPECT_EQ(e5[0].staff, companion);
+        EXPECT_EQ(e5[0].level, loud);
+        EXPECT_EQ(e5[1].staff, 0);
+        EXPECT_EQ(e5[1].level, quiet);
+        const std::vector<HeardNote> c5 = matchingMidiSorted(heardNotes(loadPart(score, 0)), 72);
+        ASSERT_FALSE(c5.empty());
+        EXPECT_EQ(c5[0].staff, 0);
+        EXPECT_EQ(c5[0].level, quiet);
+    }
+
+    emphasis.setOnlyAttenuateEmphasizedMeasures(true);
+    EXPECT_TRUE(emphasis.document().onlyAttenuateEmphasizedMeasures);
+    EXPECT_TRUE(emphasis.appliesPlaybackMixing(measure1));
+    EXPECT_FALSE(emphasis.appliesPlaybackMixing(measure2));
+    EXPECT_TRUE(emphasis.appliesPlaybackMixing(measure1Lower));
+
+    {
+        const std::vector<HeardNote> e5 = matchingMidiSorted(heardNotes(loadPart(score, 0)), 76);
+        ASSERT_GE(e5.size(), 2u);
+        EXPECT_EQ(e5[0].staff, companion);
+        EXPECT_EQ(e5[0].level, loud);
+        EXPECT_EQ(e5[1].staff, 0);
+        EXPECT_EQ(e5[1].level, writtenLevel);
+        const std::vector<HeardNote> c5 = matchingMidiSorted(heardNotes(loadPart(score, 0)), 72);
+        ASSERT_GE(c5.size(), 2u);
+        EXPECT_EQ(c5[0].staff, 0);
+        EXPECT_EQ(c5[0].level, quiet);
+        EXPECT_EQ(c5[1].staff, 0);
+        EXPECT_EQ(c5[1].level, writtenLevel);
+    }
+
+    emphasis.setSolo(true);
+    emphasis.setEditingPartId(score, "S1");
+    EXPECT_TRUE(emphasis.appliesPlaybackMixing(measure1));
+    EXPECT_FALSE(emphasis.appliesPlaybackMixing(measure2));
+    {
+        const std::vector<HeardNote> c5 = matchingMidiSorted(heardNotes(loadPart(score, 0)), 72);
+        ASSERT_GE(c5.size(), 2u);
+        EXPECT_EQ(c5[0].level, MIN_DYNAMIC_LEVEL);
+        EXPECT_EQ(c5[1].level, writtenLevel);
+    }
+
+    delete score;
+}
+
+TEST(Engraving_PracticeEmphasis, SparseMeasuresSidecarRoundTripAndOldDefaultOff)
+{
+    PracticeEmphasisData parsed;
+    const muse::ByteArray v3(
+        "{"
+        "\"version\":3,"
+        "\"playbackActive\":true,"
+        "\"solo\":true,"
+        "\"parts\":[{\"id\":\"S1\",\"name\":\"1st soprano\",\"staffIndex\":0,\"voice\":0,\"role\":\"top\",\"selected\":true}]"
+        "}");
+    EXPECT_TRUE(parsed.fromJson(v3));
+    EXPECT_EQ(parsed.document().version, PracticeEmphasisData::CURRENT_VERSION);
+    EXPECT_FALSE(parsed.document().onlyAttenuateEmphasizedMeasures);
+    EXPECT_TRUE(parsed.document().solo);
+
+    parsed.setOnlyAttenuateEmphasizedMeasures(true);
+    const muse::ByteArray written = parsed.toJson();
+    const std::string text(written.constChar(), written.size());
+    EXPECT_NE(text.find("onlyAttenuateEmphasizedMeasures"), std::string::npos);
+
+    PracticeEmphasisData roundtrip;
+    EXPECT_TRUE(roundtrip.fromJson(written));
+    EXPECT_TRUE(roundtrip.document().onlyAttenuateEmphasizedMeasures);
+    EXPECT_EQ(roundtrip.document().version, PracticeEmphasisData::CURRENT_VERSION);
+    EXPECT_EQ(roundtrip.document(), parsed.document());
 }

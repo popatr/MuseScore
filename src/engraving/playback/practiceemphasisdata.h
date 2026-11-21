@@ -31,6 +31,7 @@
 #include "global/types/translatablestring.h"
 
 namespace mu::engraving {
+class Measure;
 class Note;
 class Score;
 
@@ -48,7 +49,7 @@ public:
     static constexpr float DEFAULT_EMPHASIZED_DB = 9.f;
     static constexpr float DEFAULT_OTHER_DB = -15.f;
     static constexpr float SOLO_MUTE_DB = -60.f;
-    static constexpr int CURRENT_VERSION = 3;
+    static constexpr int CURRENT_VERSION = 4;
 
     enum class Role {
         Any,
@@ -91,6 +92,7 @@ public:
         int toMeasure = 0;
         std::string editingPartId;
         bool solo = false;
+        bool onlyAttenuateEmphasizedMeasures = false;
         std::vector<PartRule> parts;
 
         bool operator==(const Document& other) const;
@@ -113,6 +115,7 @@ public:
     void setPartSelected(const Score* score, const std::string& id, bool selected);
     void setEditingPartId(const Score* score, const std::string& id);
     void setSolo(bool enabled);
+    void setOnlyAttenuateEmphasizedMeasures(bool enabled);
     void setPartName(const std::string& id, const std::string& name);
     void setPartParent(const Score* score, const std::string& id, const std::string& parentId);
     std::string addCustomPart(const Score* score, const std::string& name = {}, const std::string& parentId = {});
@@ -133,8 +136,19 @@ public:
     float otherGainDb() const;
     void editNote(Note* note);
 
+    //! True when playback mixing should run for this note. Empty measures are
+    //! skipped when onlyAttenuateEmphasizedMeasures is on (O(log n) lookup).
+    bool appliesPlaybackMixing(const Note* note) const;
+
+    //! Displayed measure numbers that contain at least one emphasized note.
+    //! Rebuilt in the same score walk as emphasizedVoices().
+    bool measureContainsEmphasizedNote(const Measure* measure) const;
+
     //! Staff/voice pairs that contain at least one emphasized note.
     std::vector<std::pair<int, int> > emphasizedVoices(const Score* score) const;
+
+    //! Sorted [startTick, endTick) ranges for measures that contain emphasis.
+    const std::vector<std::pair<int, int> >& emphasizedMeasureTickRanges(const Score* score) const;
 
     muse::async::Channel<> changed() const { return m_changed; }
     muse::async::Channel<> nonUndoableChanged() const { return m_nonUndoableChanged; }
@@ -162,10 +176,19 @@ private:
     void commitToScoreUndo(const Score* score, const Document& before, const muse::TranslatableString& actionName);
     void projectNonUndoableFields(Document& snap) const;
     void notifyListeners(bool nonUndoable = false);
+    void invalidatePlaybackCache() const;
+    void rebuildPlaybackCache(const Score* score) const;
+    void ensurePlaybackCache(const Score* score) const;
 
     Document m_document;
     muse::ByteArray m_unreadableSidecar;
     muse::async::Channel<> m_changed;
     muse::async::Channel<> m_nonUndoableChanged;
+
+    mutable bool m_playbackCacheValid = false;
+    mutable const Score* m_playbackCacheScore = nullptr;
+    mutable std::vector<int> m_emphasizedMeasureNumbers;
+    mutable std::vector<std::pair<int, int> > m_emphasizedMeasureTickRanges;
+    mutable std::vector<std::pair<int, int> > m_emphasizedVoices;
 };
 }

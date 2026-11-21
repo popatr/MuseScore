@@ -309,6 +309,7 @@ bool PracticeEmphasisData::Document::operator==(const Document& other) const
            && toMeasure == other.toMeasure
            && editingPartId == other.editingPartId
            && solo == other.solo
+           && onlyAttenuateEmphasizedMeasures == other.onlyAttenuateEmphasizedMeasures
            && parts == other.parts;
 }
 
@@ -359,6 +360,7 @@ void PracticeEmphasisData::setDocument(Document document, bool notify)
 {
     m_document = std::move(document);
     m_unreadableSidecar = {};
+    invalidatePlaybackCache();
     if (notify) {
         notifyListeners();
     }
@@ -383,6 +385,7 @@ bool PracticeEmphasisData::isDefault() const
            && m_document.toMeasure == 0
            && m_document.editingPartId.empty()
            && !m_document.solo
+           && !m_document.onlyAttenuateEmphasizedMeasures
            && m_document.parts.empty();
 }
 
@@ -405,6 +408,7 @@ muse::ByteArray PracticeEmphasisData::toJson() const
     root.set("toMeasure", m_document.toMeasure);
     root.set("editingPartId", m_document.editingPartId);
     root.set("solo", m_document.solo);
+    root.set("onlyAttenuateEmphasizedMeasures", m_document.onlyAttenuateEmphasizedMeasures);
 
     muse::JsonArray parts;
     for (const PartRule& part : m_document.parts) {
@@ -473,6 +477,7 @@ bool PracticeEmphasisData::fromJson(const muse::ByteArray& json)
     next.toMeasure = std::max(0, root.value("toMeasure").toInt());
     next.editingPartId = root.value("editingPartId").toStdString();
     next.solo = root.value("solo").toBool();
+    next.onlyAttenuateEmphasizedMeasures = root.value("onlyAttenuateEmphasizedMeasures").toBool();
 
     const muse::JsonValue partsValue = root.value("parts");
     const muse::JsonArray parts = partsValue.isArray() ? partsValue.toArray() : muse::JsonArray();
@@ -681,6 +686,15 @@ void PracticeEmphasisData::setSolo(bool enabled)
         return;
     }
     m_document.solo = enabled;
+    applyNonUndoableChange();
+}
+
+void PracticeEmphasisData::setOnlyAttenuateEmphasizedMeasures(bool enabled)
+{
+    if (m_document.onlyAttenuateEmphasizedMeasures == enabled) {
+        return;
+    }
+    m_document.onlyAttenuateEmphasizedMeasures = enabled;
     applyNonUndoableChange();
 }
 
@@ -1140,21 +1154,74 @@ void PracticeEmphasisData::editNote(Note* note)
     commitToScoreUndo(score, before, muse::TranslatableString("undoableAction", "Edit practice emphasis"));
 }
 
+bool PracticeEmphasisData::appliesPlaybackMixing(const Note* note) const
+{
+    if (!note || !playbackEngaged()) {
+        return false;
+    }
+    if (!m_document.onlyAttenuateEmphasizedMeasures) {
+        return true;
+    }
+    return measureContainsEmphasizedNote(note->findMeasure());
+}
+
+bool PracticeEmphasisData::measureContainsEmphasizedNote(const Measure* measure) const
+{
+    if (!measure) {
+        return false;
+    }
+    ensurePlaybackCache(measure->score());
+    const int number = displayedMeasureNumber(measure);
+    return std::binary_search(m_emphasizedMeasureNumbers.begin(), m_emphasizedMeasureNumbers.end(), number);
+}
+
 std::vector<std::pair<int, int> > PracticeEmphasisData::emphasizedVoices(const Score* score) const
 {
-    std::vector<std::pair<int, int> > voices;
+    rebuildPlaybackCache(score);
+    return m_emphasizedVoices;
+}
+
+const std::vector<std::pair<int, int> >& PracticeEmphasisData::emphasizedMeasureTickRanges(const Score* score) const
+{
+    ensurePlaybackCache(score);
+    return m_emphasizedMeasureTickRanges;
+}
+
+void PracticeEmphasisData::invalidatePlaybackCache() const
+{
+    m_playbackCacheValid = false;
+    m_playbackCacheScore = nullptr;
+    m_emphasizedMeasureNumbers.clear();
+    m_emphasizedMeasureTickRanges.clear();
+    m_emphasizedVoices.clear();
+}
+
+void PracticeEmphasisData::ensurePlaybackCache(const Score* score) const
+{
+    if (m_playbackCacheValid && m_playbackCacheScore == score) {
+        return;
+    }
+    rebuildPlaybackCache(score);
+}
+
+void PracticeEmphasisData::rebuildPlaybackCache(const Score* score) const
+{
+    invalidatePlaybackCache();
+    m_playbackCacheScore = score;
+    m_playbackCacheValid = true;
     if (!score) {
-        return voices;
+        return;
     }
 
-    auto add = [&voices](int staff, int voice) {
+    auto addVoice = [this](int staff, int voice) {
         const std::pair<int, int> key { staff, voice };
-        if (std::find(voices.begin(), voices.end(), key) == voices.end()) {
-            voices.push_back(key);
+        if (std::find(m_emphasizedVoices.begin(), m_emphasizedVoices.end(), key) == m_emphasizedVoices.end()) {
+            m_emphasizedVoices.push_back(key);
         }
     };
 
     for (Measure* measure = score->firstMeasure(); measure; measure = measure->nextMeasure()) {
+        bool measureHasEmphasis = false;
         for (Segment* segment = measure->first(SegmentType::ChordRest); segment; segment = segment->next(SegmentType::ChordRest)) {
             for (track_idx_t track = 0; track < score->ntracks(); ++track) {
                 const EngravingItem* element = segment->element(track);
@@ -1163,13 +1230,20 @@ std::vector<std::pair<int, int> > PracticeEmphasisData::emphasizedVoices(const S
                 }
                 visitChordNotes(toChord(element), [&](const Note* note) {
                     if (isEmphasized(note)) {
-                        add(static_cast<int>(note->staffIdx()), static_cast<int>(note->voice()));
+                        measureHasEmphasis = true;
+                        addVoice(static_cast<int>(note->staffIdx()), static_cast<int>(note->voice()));
                     }
                 });
             }
         }
+        if (measureHasEmphasis) {
+            m_emphasizedMeasureNumbers.push_back(displayedMeasureNumber(measure));
+            const int startTick = measure->tick().ticks();
+            const int endTick = (measure->tick() + measure->ticks()).ticks();
+            m_emphasizedMeasureTickRanges.emplace_back(startTick, endTick);
+        }
     }
-    return voices;
+    std::sort(m_emphasizedMeasureNumbers.begin(), m_emphasizedMeasureNumbers.end());
 }
 
 void PracticeEmphasisData::projectNonUndoableFields(Document& snap) const
@@ -1182,6 +1256,7 @@ void PracticeEmphasisData::projectNonUndoableFields(Document& snap) const
     snap.fromMeasure = m_document.fromMeasure;
     snap.toMeasure = m_document.toMeasure;
     snap.solo = m_document.solo;
+    snap.onlyAttenuateEmphasizedMeasures = m_document.onlyAttenuateEmphasizedMeasures;
     snap.editingPartId = m_document.editingPartId;
 
     std::vector<PartRule> next;
@@ -1311,6 +1386,7 @@ bool PracticeEmphasisData::copyFromPart(const Score* score, const std::string& t
 
 void PracticeEmphasisData::notifyListeners(bool nonUndoable)
 {
+    invalidatePlaybackCache();
     m_changed.send();
     if (nonUndoable) {
         m_nonUndoableChanged.send();
