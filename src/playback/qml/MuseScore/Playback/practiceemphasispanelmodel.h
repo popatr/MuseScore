@@ -58,6 +58,8 @@ class PracticeEmphasisPanelModel : public QObject, public muse::Contextable, pub
     Q_PROPERTY(int editingPartIndex READ editingPartIndex NOTIFY stateChanged)
     Q_PROPERTY(int editingPartParentIndex READ editingPartParentIndex NOTIFY stateChanged)
     Q_PROPERTY(bool solo READ solo WRITE setSolo NOTIFY stateChanged)
+    Q_PROPERTY(bool onlyAttenuateEmphasizedMeasures READ onlyAttenuateEmphasizedMeasures
+               WRITE setOnlyAttenuateEmphasizedMeasures NOTIFY stateChanged)
     Q_PROPERTY(QVariantList parentOptions READ parentOptions NOTIFY stateChanged)
     Q_PROPERTY(bool canDeleteEditingPart READ canDeleteEditingPart NOTIFY stateChanged)
     Q_PROPERTY(QString selectionButtonText READ selectionButtonText NOTIFY stateChanged)
@@ -104,6 +106,7 @@ public:
     int editingPartIndex() const;
     int editingPartParentIndex() const;
     bool solo() const;
+    bool onlyAttenuateEmphasizedMeasures() const;
     QVariantList parentOptions() const;
     bool canDeleteEditingPart() const;
     QString selectionButtonText() const;
@@ -120,6 +123,7 @@ public:
     void setToMeasure(int measure);
     void setEditingPartId(const QString& partId);
     void setSolo(bool enabled);
+    void setOnlyAttenuateEmphasizedMeasures(bool enabled);
     void setCopySourceId(const QString& sourceId);
 
     //! Unit tests attach a MasterScore without a QML/IoC stack. Unused in the app.

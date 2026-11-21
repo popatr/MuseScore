@@ -345,6 +345,25 @@ TEST_F(Playback_PracticeEmphasisPanelModelTests, SoloMutesNonEditingNotes)
     EXPECT_TRUE(m_score->practiceEmphasis().isEmphasized(alto));
 }
 
+TEST_F(Playback_PracticeEmphasisPanelModelTests, SparseMeasuresToggleIsNonUndoable)
+{
+    EXPECT_FALSE(m_model.onlyAttenuateEmphasizedMeasures());
+    m_model.setOnlyAttenuateEmphasizedMeasures(true);
+    EXPECT_TRUE(m_model.onlyAttenuateEmphasizedMeasures());
+    EXPECT_TRUE(m_score->practiceEmphasis().document().onlyAttenuateEmphasizedMeasures);
+    EXPECT_FALSE(m_score->undoStack()->canUndo());
+
+    Note* d5 = findPitch(m_score, 74);
+    ASSERT_TRUE(d5);
+    m_model.setEditingPartId(QStringLiteral("S1"));
+    m_score->practiceEmphasis().editNote(d5);
+    EXPECT_TRUE(m_score->undoStack()->canUndo());
+
+    m_score->undoRedo(true, nullptr);
+    EXPECT_TRUE(m_model.onlyAttenuateEmphasizedMeasures());
+    EXPECT_TRUE(m_score->practiceEmphasis().partContains(d5, "S1"));
+}
+
 TEST_F(Playback_PracticeEmphasisPanelModelTests, FromSelectionAndAllMeasureRange)
 {
     ASSERT_TRUE(m_score->firstMeasure());

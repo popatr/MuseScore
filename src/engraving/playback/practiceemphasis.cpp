@@ -36,6 +36,7 @@
 #include "mpe/mpetypes.h"
 
 #include "renderingcontext.h"
+#include "utils/arrangementutils.h"
 #include "utils/expressionutils.h"
 
 using namespace mu::engraving;
@@ -100,6 +101,80 @@ bool partOwnsStaff(const DynamicAutomationLayers& layers, int staffIndex)
     }
     return false;
 }
+
+bool timestampInRanges(timestamp_t t, const std::vector<std::pair<timestamp_t, timestamp_t> >& ranges)
+{
+    auto it = std::upper_bound(ranges.begin(), ranges.end(), t,
+                               [](timestamp_t value, const std::pair<timestamp_t, timestamp_t>& range) {
+        return value < range.first;
+    });
+    if (it == ranges.begin()) {
+        return false;
+    }
+    --it;
+    return t >= it->first && t < it->second;
+}
+
+muse::mpe::AutomationPoint pointAt(const DynamicAutomationMap& curve, timestamp_t t)
+{
+    if (curve.empty()) {
+        return {};
+    }
+    auto it = curve.upper_bound(t);
+    if (it == curve.begin()) {
+        return it->second;
+    }
+    --it;
+    return it->second;
+}
+
+std::vector<std::pair<timestamp_t, timestamp_t> > emphasizedTimestampRanges(const Score* score,
+                                                                            const std::vector<std::pair<int, int> >& tickRanges)
+{
+    std::vector<std::pair<timestamp_t, timestamp_t> > ranges;
+    ranges.reserve(tickRanges.size());
+    for (const std::pair<int, int>& ticks : tickRanges) {
+        ranges.emplace_back(timestampFromTicks(score, ticks.first), timestampFromTicks(score, ticks.second));
+    }
+    return ranges;
+}
+
+void applyCurveInRanges(DynamicAutomationMap& curve, float gainDb, bool mute,
+                        const std::vector<std::pair<timestamp_t, timestamp_t> >& ranges)
+{
+    if (curve.empty() || ranges.empty()) {
+        return;
+    }
+
+    const DynamicAutomationMap original = curve;
+    DynamicAutomationMap next;
+
+    auto transformed = [&](const muse::mpe::AutomationPoint& point) {
+        muse::mpe::AutomationPoint scaled = point;
+        if (mute) {
+            const muse::real_t muted = muse::real_t(static_cast<double>(MIN_DYNAMIC_LEVEL)
+                                                    / static_cast<double>(MAX_DYNAMIC_LEVEL));
+            scaled.outValue = muted;
+            if (auto* arrival = std::get_if<muse::mpe::AutomationPoint::ExplicitArrival>(&scaled.inValue)) {
+                arrival->value = muted;
+            }
+            return scaled;
+        }
+        DynamicAutomationMap single;
+        single[timestamp_t(0)] = scaled;
+        scaleCurve(single, gainDb);
+        return single.begin()->second;
+    };
+
+    for (const auto& pair : original) {
+        next[pair.first] = timestampInRanges(pair.first, ranges) ? transformed(pair.second) : pair.second;
+    }
+    for (const std::pair<timestamp_t, timestamp_t>& range : ranges) {
+        next[range.first] = transformed(pointAt(original, range.first));
+        next[range.second] = pointAt(original, range.second);
+    }
+    curve = std::move(next);
+}
 }
 
 dynamic_level_t PracticeEmphasis::scaleDynamicLevel(dynamic_level_t level, float gainDb)
@@ -128,7 +203,7 @@ void PracticeEmphasis::applyToNote(const Note* note, NominalNoteCtx& ctx)
         return;
     }
     const PracticeEmphasisData& data = master->practiceEmphasis();
-    if (!data.playbackEngaged()) {
+    if (!data.appliesPlaybackMixing(note)) {
         return;
     }
 
@@ -171,6 +246,11 @@ void PracticeEmphasis::applyToDynamics(const Score* score, DynamicAutomationLaye
         return;
     }
 
+    const std::vector<std::pair<timestamp_t, timestamp_t> > sparseRanges
+        = data.document().onlyAttenuateEmphasizedMeasures
+          ? emphasizedTimestampRanges(score, data.emphasizedMeasureTickRanges(score))
+          : std::vector<std::pair<timestamp_t, timestamp_t> > {};
+
     std::vector<std::pair<layer_idx_t, DynamicAutomationMap> > companions;
     for (const std::pair<int, int>& voice : emphasizedVoices) {
         if (!partOwnsStaff(layers, voice.first)) {
@@ -190,7 +270,9 @@ void PracticeEmphasis::applyToDynamics(const Score* score, DynamicAutomationLaye
         if (static_cast<int>(it->first / muse::mpe::MAX_VOICES) >= EMPHASIS_STAFF_OFFSET) {
             continue;
         }
-        if (data.document().solo) {
+        if (data.document().onlyAttenuateEmphasizedMeasures) {
+            applyCurveInRanges(it->second, data.otherGainDb(), data.document().solo, sparseRanges);
+        } else if (data.document().solo) {
             muteCurve(it->second);
         } else {
             scaleCurve(it->second, data.otherGainDb());
